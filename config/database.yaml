@@ -1,0 +1,544 @@
+# Database Schema Configuration for NBA Prediction Model
+
+database:
+  type: sqlite
+  path: ./data/nba_predictions.db
+
+tables:
+  # Games table - stores game results and metadata
+  games:
+    columns:
+      - name: game_id
+        type: TEXT
+        primary_key: true
+        description: "Unique game identifier (e.g., '0022300123')"
+      
+      - name: season
+        type: TEXT
+        description: "Season year (e.g., '2023-24')"
+      
+      - name: season_type
+        type: TEXT
+        description: "Regular Season, Playoffs, etc."
+      
+      - name: game_date
+        type: DATE
+        description: "Date of the game"
+      
+      - name: home_team_id
+        type: TEXT
+        foreign_key: teams.team_id
+        description: "Home team identifier"
+      
+      - name: away_team_id
+        type: TEXT
+        foreign_key: teams.team_id
+        description: "Away team identifier"
+      
+      - name: home_score
+        type: INTEGER
+        nullable: true
+        description: "Home team final score"
+      
+      - name: away_score
+        type: INTEGER
+        nullable: true
+        description: "Away team final score"
+      
+      - name: winner
+        type: TEXT
+        nullable: true
+        description: "Winning team ID (home or away)"
+      
+      - name: point_differential
+        type: INTEGER
+        nullable: true
+        description: "Home score - Away score"
+      
+      - name: game_status
+        type: TEXT
+        default: "scheduled"
+        description: "scheduled, live, finished, postponed"
+      
+      - name: created_at
+        type: TIMESTAMP
+        default: CURRENT_TIMESTAMP
+      
+      - name: updated_at
+        type: TIMESTAMP
+        default: CURRENT_TIMESTAMP
+    
+    indexes:
+      - columns: [game_date]
+      - columns: [home_team_id, game_date]
+      - columns: [away_team_id, game_date]
+      - columns: [season, season_type]
+
+  # Teams table - stores team metadata
+  teams:
+    columns:
+      - name: team_id
+        type: TEXT
+        primary_key: true
+        description: "Team identifier (e.g., '1610612737')"
+      
+      - name: team_name
+        type: TEXT
+        description: "Full team name"
+      
+      - name: team_abbreviation
+        type: TEXT
+        description: "Team abbreviation (e.g., 'ATL')"
+      
+      - name: city
+        type: TEXT
+        description: "Team city"
+      
+      - name: conference
+        type: TEXT
+        description: "Eastern or Western"
+      
+      - name: division
+        type: TEXT
+        description: "Division name"
+      
+      - name: created_at
+        type: TIMESTAMP
+        default: CURRENT_TIMESTAMP
+
+  # Team stats table - stores team statistics per game
+  team_stats:
+    columns:
+      - name: id
+        type: INTEGER
+        primary_key: true
+        auto_increment: true
+      
+      - name: game_id
+        type: TEXT
+        foreign_key: games.game_id
+        description: "Game identifier"
+      
+      - name: team_id
+        type: TEXT
+        foreign_key: teams.team_id
+        description: "Team identifier"
+      
+      - name: is_home
+        type: BOOLEAN
+        description: "True if home team"
+      
+      # Scoring
+      - name: points
+        type: INTEGER
+        description: "Total points scored"
+      
+      - name: field_goals_made
+        type: INTEGER
+        description: "FGM"
+      
+      - name: field_goals_attempted
+        type: INTEGER
+        description: "FGA"
+      
+      - name: field_goal_percentage
+        type: REAL
+        description: "FG%"
+      
+      - name: three_pointers_made
+        type: INTEGER
+        description: "3PM"
+      
+      - name: three_pointers_attempted
+        type: INTEGER
+        description: "3PA"
+      
+      - name: three_point_percentage
+        type: REAL
+        description: "3P%"
+      
+      - name: free_throws_made
+        type: INTEGER
+        description: "FTM"
+      
+      - name: free_throws_attempted
+        type: INTEGER
+        description: "FTA"
+      
+      - name: free_throw_percentage
+        type: REAL
+        description: "FT%"
+      
+      # Rebounding
+      - name: rebounds_offensive
+        type: INTEGER
+        description: "ORB"
+      
+      - name: rebounds_defensive
+        type: INTEGER
+        description: "DRB"
+      
+      - name: rebounds_total
+        type: INTEGER
+        description: "Total rebounds"
+      
+      # Other stats
+      - name: assists
+        type: INTEGER
+        description: "Assists"
+      
+      - name: steals
+        type: INTEGER
+        description: "Steals"
+      
+      - name: blocks
+        type: INTEGER
+        description: "Blocks"
+      
+      - name: turnovers
+        type: INTEGER
+        description: "Turnovers"
+      
+      - name: personal_fouls
+        type: INTEGER
+        description: "Personal fouls"
+      
+      # Advanced metrics (calculated)
+      - name: offensive_rating
+        type: REAL
+        nullable: true
+        description: "Points per 100 possessions"
+      
+      - name: defensive_rating
+        type: REAL
+        nullable: true
+        description: "Points allowed per 100 possessions"
+      
+      - name: pace
+        type: REAL
+        nullable: true
+        description: "Possessions per game"
+      
+      - name: true_shooting_percentage
+        type: REAL
+        nullable: true
+        description: "TS%"
+      
+      - name: effective_field_goal_percentage
+        type: REAL
+        nullable: true
+        description: "eFG%"
+      
+      - name: created_at
+        type: TIMESTAMP
+        default: CURRENT_TIMESTAMP
+    
+    indexes:
+      - columns: [game_id, team_id]
+        unique: true
+      - columns: [team_id, game_id]
+      - columns: [game_id]
+
+  # Player stats table - stores individual player statistics per game
+  player_stats:
+    columns:
+      - name: id
+        type: INTEGER
+        primary_key: true
+        auto_increment: true
+      
+      - name: game_id
+        type: TEXT
+        foreign_key: games.game_id
+        description: "Game identifier"
+      
+      - name: player_id
+        type: TEXT
+        description: "Player identifier"
+      
+      - name: team_id
+        type: TEXT
+        foreign_key: teams.team_id
+        description: "Team identifier"
+      
+      - name: player_name
+        type: TEXT
+        description: "Player full name"
+      
+      - name: minutes_played
+        type: TEXT
+        description: "Minutes played (format: MM:SS)"
+      
+      - name: points
+        type: INTEGER
+        description: "Points scored"
+      
+      - name: rebounds
+        type: INTEGER
+        description: "Total rebounds"
+      
+      - name: assists
+        type: INTEGER
+        description: "Assists"
+      
+      - name: field_goals_made
+        type: INTEGER
+        description: "FGM"
+      
+      - name: field_goals_attempted
+        type: INTEGER
+        description: "FGA"
+      
+      - name: three_pointers_made
+        type: INTEGER
+        description: "3PM"
+      
+      - name: three_pointers_attempted
+        type: INTEGER
+        description: "3PA"
+      
+      - name: free_throws_made
+        type: INTEGER
+        description: "FTM"
+      
+      - name: free_throws_attempted
+        type: INTEGER
+        description: "FTA"
+      
+      - name: plus_minus
+        type: INTEGER
+        nullable: true
+        description: "Plus/minus"
+      
+      - name: injury_status
+        type: TEXT
+        nullable: true
+        default: "healthy"
+        description: "healthy, questionable, out, etc."
+      
+      - name: created_at
+        type: TIMESTAMP
+        default: CURRENT_TIMESTAMP
+    
+    indexes:
+      - columns: [game_id, player_id]
+        unique: true
+      - columns: [player_id, game_id]
+      - columns: [team_id, game_id]
+
+  # Betting lines table - stores betting odds and lines
+  betting_lines:
+    columns:
+      - name: id
+        type: INTEGER
+        primary_key: true
+        auto_increment: true
+      
+      - name: game_id
+        type: TEXT
+        foreign_key: games.game_id
+        description: "Game identifier"
+      
+      - name: sportsbook
+        type: TEXT
+        description: "Sportsbook name (e.g., 'draftkings', 'fanduel')"
+      
+      - name: point_spread_home
+        type: REAL
+        nullable: true
+        description: "Point spread for home team"
+      
+      - name: point_spread_away
+        type: REAL
+        nullable: true
+        description: "Point spread for away team"
+      
+      - name: moneyline_home
+        type: INTEGER
+        nullable: true
+        description: "Moneyline odds for home team (American format)"
+      
+      - name: moneyline_away
+        type: INTEGER
+        nullable: true
+        description: "Moneyline odds for away team (American format)"
+      
+      - name: over_under
+        type: REAL
+        nullable: true
+        description: "Total points over/under line"
+      
+      - name: timestamp
+        type: TIMESTAMP
+        default: CURRENT_TIMESTAMP
+        description: "When the line was fetched"
+      
+      - name: created_at
+        type: TIMESTAMP
+        default: CURRENT_TIMESTAMP
+    
+    indexes:
+      - columns: [game_id, sportsbook, timestamp]
+      - columns: [game_id, timestamp]
+      - columns: [timestamp]
+
+  # Features table - stores engineered features for modeling
+  features:
+    columns:
+      - name: id
+        type: INTEGER
+        primary_key: true
+        auto_increment: true
+      
+      - name: game_id
+        type: TEXT
+        foreign_key: games.game_id
+        description: "Game identifier"
+      
+      - name: feature_name
+        type: TEXT
+        description: "Name of the feature"
+      
+      - name: feature_value
+        type: REAL
+        nullable: true
+        description: "Feature value"
+      
+      - name: feature_category
+        type: TEXT
+        description: "team, matchup, contextual, betting"
+      
+      - name: team_id
+        type: TEXT
+        nullable: true
+        foreign_key: teams.team_id
+        description: "Team ID if feature is team-specific"
+      
+      - name: created_at
+        type: TIMESTAMP
+        default: CURRENT_TIMESTAMP
+    
+    indexes:
+      - columns: [game_id, feature_name]
+        unique: true
+      - columns: [game_id, feature_category]
+      - columns: [feature_category]
+
+  # Predictions table - stores model predictions
+  predictions:
+    columns:
+      - name: id
+        type: INTEGER
+        primary_key: true
+        auto_increment: true
+      
+      - name: game_id
+        type: TEXT
+        foreign_key: games.game_id
+        description: "Game identifier"
+      
+      - name: model_name
+        type: TEXT
+        description: "Name of the model used"
+      
+      - name: predicted_winner
+        type: TEXT
+        nullable: true
+        foreign_key: teams.team_id
+        description: "Predicted winning team"
+      
+      - name: win_probability_home
+        type: REAL
+        description: "Probability home team wins (0-1)"
+      
+      - name: win_probability_away
+        type: REAL
+        description: "Probability away team wins (0-1)"
+      
+      - name: predicted_point_differential
+        type: REAL
+        nullable: true
+        description: "Predicted point differential (home - away)"
+      
+      - name: confidence
+        type: REAL
+        description: "Model confidence (max of win probabilities)"
+      
+      - name: created_at
+        type: TIMESTAMP
+        default: CURRENT_TIMESTAMP
+    
+    indexes:
+      - columns: [game_id, model_name]
+        unique: true
+      - columns: [game_id]
+      - columns: [created_at]
+
+  # Bets table - stores betting decisions and outcomes
+  bets:
+    columns:
+      - name: id
+        type: INTEGER
+        primary_key: true
+        auto_increment: true
+      
+      - name: game_id
+        type: TEXT
+        foreign_key: games.game_id
+        description: "Game identifier"
+      
+      - name: bet_type
+        type: TEXT
+        description: "spread, moneyline, over_under"
+      
+      - name: bet_team
+        type: TEXT
+        nullable: true
+        foreign_key: teams.team_id
+        description: "Team bet on (for spread/moneyline)"
+      
+      - name: bet_value
+        type: REAL
+        nullable: true
+        description: "Spread value or over/under value"
+      
+      - name: bet_amount
+        type: REAL
+        description: "Amount wagered"
+      
+      - name: odds
+        type: REAL
+        description: "Odds (decimal format)"
+      
+      - name: expected_value
+        type: REAL
+        description: "Expected value of the bet"
+      
+      - name: outcome
+        type: TEXT
+        nullable: true
+        description: "win, loss, push"
+      
+      - name: payout
+        type: REAL
+        nullable: true
+        description: "Payout amount (if won)"
+      
+      - name: profit
+        type: REAL
+        nullable: true
+        description: "Profit/loss from bet"
+      
+      - name: placed_at
+        type: TIMESTAMP
+        default: CURRENT_TIMESTAMP
+      
+      - name: resolved_at
+        type: TIMESTAMP
+        nullable: true
+    
+    indexes:
+      - columns: [game_id]
+      - columns: [placed_at]
+      - columns: [outcome]
+
