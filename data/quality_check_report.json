@@ -1,0 +1,115 @@
+{
+  "basic_counts": {
+    "teams": 30,
+    "games": 2580,
+    "team_stats": 5057,
+    "player_stats": 52130,
+    "betting_lines": 0
+  },
+  "teams": {
+    "total": 30,
+    "missing_fields": {},
+    "duplicates": 0,
+    "issues": []
+  },
+  "games": {
+    "total": 2580,
+    "missing_fields": {
+      "home_team_id": 38,
+      "away_team_id": 38
+    },
+    "invalid_scores": 0,
+    "winner_issues": 38,
+    "season_counts": {
+      "2022-23": 2542,
+      "2023-24": 38
+    },
+    "issues": []
+  },
+  "team_stats": {
+    "total": 5057,
+    "games_with_stats": 2531,
+    "expected_games": 2542,
+    "missing_stats": 27,
+    "missing_fields": {},
+    "invalid_values": 5057,
+    "issues": []
+  },
+  "player_stats": {
+    "total": 52130,
+    "games_with_stats": 2526,
+    "expected_games": 2542,
+    "missing_fields": {},
+    "issues": []
+  },
+  "data_completeness": {
+    "games_without_team_stats": 55,
+    "games_without_player_stats": 60,
+    "games_with_one_team_stat": 5
+  },
+  "data_consistency": {
+    "orphaned_team_stats": 12,
+    "orphaned_player_stats": 122,
+    "invalid_team_ids": 0
+  },
+  "date_ranges": {
+    "min_date": "2022-10-18",
+    "max_date": "2025-04-13",
+    "season_counts": {
+      "2022-23": 2542,
+      "2023-24": 38
+    },
+    "expected_games": {
+      "2022-23": 1230,
+      "2023-24": 1230,
+      "2024-25": 1230
+    }
+  },
+  "duplicates": {
+    "duplicate_games": 0,
+    "duplicate_team_stats": 0
+  },
+  "sample_records": {
+    "game": {
+      "game_id": "0022300123",
+      "season": "2022-23",
+      "game_date": "2023-11-01",
+      "home_team_id": "1610612750",
+      "away_team_id": "1610612743",
+      "home_score": 110,
+      "away_score": 89,
+      "game_status": "finished"
+    },
+    "team_stat": {
+      "game_id": "0022401199",
+      "team_id": "1610612757",
+      "points": 109,
+      "field_goals_made": 42,
+      "field_goal_percentage": 0.438
+    },
+    "player_stat": {
+      "game_id": "0022401199",
+      "player_id": "1631200",
+      "player_name": "Kris Murray",
+      "points": 10,
+      "rebounds": 11,
+      "assists": 3
+    }
+  },
+  "summary": {
+    "overall_status": "NEEDS_ATTENTION",
+    "total_games": 2580,
+    "total_team_stats": 5057,
+    "total_player_stats": 52130,
+    "data_coverage": {
+      "team_stats": "98.0%",
+      "avg_players_per_game": "20.2"
+    },
+    "issues_found": 3,
+    "warnings": [
+      "Orphaned records found",
+      "55 games missing team stats",
+      "Data quality issues in games"
+    ]
+  }
+}

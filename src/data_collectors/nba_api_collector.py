@@ -41,18 +41,43 @@ class NBAPICollector:
         time.sleep(self.rate_limit_delay)
     
     def _retry_api_call(self, func, *args, **kwargs):
-        """Retry API call with exponential backoff."""
+        """Retry API call with exponential backoff. Fails faster on timeouts."""
+        import socket
+        from requests.exceptions import Timeout, ConnectionError
+        
         for attempt in range(self.max_retries):
             try:
                 return func(*args, **kwargs)
-            except Exception as e:
+            except (Timeout, socket.timeout) as e:
+                # Timeouts: Fail faster, shorter retry delays
                 if attempt < self.max_retries - 1:
-                    wait_time = self.retry_delay * (2 ** attempt)
-                    logger.warning(f"API call failed (attempt {attempt + 1}/{self.max_retries}): {e}. Retrying in {wait_time}s...")
+                    wait_time = min(self.retry_delay * (1.5 ** attempt), 10.0)  # Cap at 10s, use 1.5x instead of 2x
+                    logger.warning(f"API timeout (attempt {attempt + 1}/{self.max_retries}): {e}. Retrying in {wait_time:.1f}s...")
                     time.sleep(wait_time)
                 else:
-                    logger.error(f"API call failed after {self.max_retries} attempts: {e}")
+                    logger.error(f"API call timed out after {self.max_retries} attempts: {e}")
                     raise
+            except (ConnectionError, Exception) as e:
+                # Other errors: Standard retry logic
+                error_str = str(e).lower()
+                if 'timeout' in error_str or 'timed out' in error_str:
+                    # Treat timeout-like errors the same way
+                    if attempt < self.max_retries - 1:
+                        wait_time = min(self.retry_delay * (1.5 ** attempt), 10.0)
+                        logger.warning(f"API error (attempt {attempt + 1}/{self.max_retries}): {e}. Retrying in {wait_time:.1f}s...")
+                        time.sleep(wait_time)
+                    else:
+                        logger.error(f"API call failed after {self.max_retries} attempts: {e}")
+                        raise
+                else:
+                    # Non-timeout errors: Standard exponential backoff
+                    if attempt < self.max_retries - 1:
+                        wait_time = self.retry_delay * (2 ** attempt)
+                        logger.warning(f"API call failed (attempt {attempt + 1}/{self.max_retries}): {e}. Retrying in {wait_time}s...")
+                        time.sleep(wait_time)
+                    else:
+                        logger.error(f"API call failed after {self.max_retries} attempts: {e}")
+                        raise
         return None
     
     def collect_all_teams(self) -> List[Dict[str, Any]]:
@@ -321,6 +346,95 @@ class NBAPICollector:
             logger.error(f"Error getting game details for {game_id}: {e}")
             return None
     
+    def collect_game_stats(self, game_id: str) -> Dict[str, List[Dict[str, Any]]]:
+        """
+        Collect BOTH team and player stats in ONE API call.
+        This eliminates the redundant second BoxScoreTraditionalV3 call.
+        
+        Args:
+            game_id: NBA game ID
+            
+        Returns:
+            Dictionary with 'team_stats' and 'player_stats' lists
+        """
+        logger.debug(f"Collecting all stats for game {game_id}")
+        
+        try:
+            self._rate_limit()
+            
+            # Single API call gets both team and player stats
+            boxscore = self._retry_api_call(
+                BoxScoreTraditionalV3,
+                game_id=game_id
+            )
+            
+            if not boxscore:
+                logger.warning(f"No boxscore data for game {game_id}")
+                return {'team_stats': [], 'player_stats': []}
+            
+            boxscore_data = boxscore.get_dict()
+            if 'boxScoreTraditional' not in boxscore_data:
+                logger.warning(f"No boxScoreTraditional data for game {game_id}")
+                return {'team_stats': [], 'player_stats': []}
+            
+            bst = boxscore_data['boxScoreTraditional']
+            home_team_id = str(bst.get('homeTeamId', ''))
+            away_team_id = str(bst.get('awayTeamId', ''))
+            
+            if not home_team_id or not away_team_id:
+                logger.warning(f"Missing team IDs for game {game_id}")
+                return {'team_stats': [], 'player_stats': []}
+            
+            # Extract team stats
+            team_stats_list = []
+            if 'homeTeam' in bst and 'statistics' in bst['homeTeam']:
+                home_stats = self._extract_team_stats_from_api(
+                    bst['homeTeam']['statistics'],
+                    game_id,
+                    home_team_id,
+                    is_home=True
+                )
+                if home_stats:
+                    team_stats_list.append(home_stats)
+            
+            if 'awayTeam' in bst and 'statistics' in bst['awayTeam']:
+                away_stats = self._extract_team_stats_from_api(
+                    bst['awayTeam']['statistics'],
+                    game_id,
+                    away_team_id,
+                    is_home=False
+                )
+                if away_stats:
+                    team_stats_list.append(away_stats)
+            
+            # Extract player stats
+            player_stats_list = []
+            if 'homeTeam' in bst and 'players' in bst['homeTeam']:
+                for player in bst['homeTeam']['players']:
+                    player_stat = self._extract_player_stats_from_api(
+                        player, game_id, home_team_id
+                    )
+                    if player_stat:
+                        player_stats_list.append(player_stat)
+            
+            if 'awayTeam' in bst and 'players' in bst['awayTeam']:
+                for player in bst['awayTeam']['players']:
+                    player_stat = self._extract_player_stats_from_api(
+                        player, game_id, away_team_id
+                    )
+                    if player_stat:
+                        player_stats_list.append(player_stat)
+            
+            logger.debug(f"Collected {len(team_stats_list)} team stats and {len(player_stats_list)} player stats for game {game_id}")
+            return {
+                'team_stats': team_stats_list,
+                'player_stats': player_stats_list
+            }
+            
+        except Exception as e:
+            logger.error(f"Error collecting game stats for {game_id}: {e}")
+            return {'team_stats': [], 'player_stats': []}
+    
     def collect_team_stats(self, game_id: str) -> List[Dict[str, Any]]:
         """
         Collect team statistics for a game using BoxScoreTraditionalV3.
@@ -446,9 +560,13 @@ class NBAPICollector:
             if fta > 0 and ft_pct == 0.0:
                 ft_pct = (ftm / fta) * 100.0
             
-            orb = get_int('offensiveRebounds', 0)
-            drb = get_int('defensiveRebounds', 0)
-            trb = get_int('rebounds', 0)
+            # NBA API uses reboundsOffensive, reboundsDefensive, reboundsTotal
+            orb = get_int('reboundsOffensive', 0)
+            drb = get_int('reboundsDefensive', 0)
+            trb = get_int('reboundsTotal', 0)
+            # Fallback: try alternative field names if primary ones are 0
+            if trb == 0:
+                trb = get_int('rebounds', 0)
             if trb == 0:
                 trb = orb + drb
             

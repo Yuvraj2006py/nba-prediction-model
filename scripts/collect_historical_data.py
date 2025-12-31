@@ -188,30 +188,27 @@ def collect_season_data(
                         existing_team_stats = session.query(TeamStats).filter_by(game_id=game_id).count()
                         existing_player_stats = session.query(PlayerStats).filter_by(game_id=game_id).count()
                     
-                    # Collect team stats if missing
-                    if existing_team_stats == 0:
+                    # Collect stats if missing (using combined method - ONE API call for both)
+                    if existing_team_stats == 0 or existing_player_stats == 0:
                         try:
-                            team_stats_list = collector.collect_team_stats(game_id)
-                            if team_stats_list:
-                                for team_stat in team_stats_list:
-                                    db_manager.insert_team_stats(team_stat)
+                            # Use combined method - ONE API call for both team and player stats
+                            stats_result = collector.collect_game_stats(game_id)
+                            
+                            # Store team stats
+                            for team_stat in stats_result['team_stats']:
+                                db_manager.insert_team_stats(team_stat)
+                            if stats_result['team_stats']:
                                 stats['games_with_team_stats'] += 1
-                        except Exception as e:
-                            logger.warning(f"Error collecting team stats for {game_id}: {e}")
-                    else:
-                        stats['games_with_team_stats'] += 1
-                    
-                    # Step 4: Collect player stats if missing
-                    if existing_player_stats == 0:
-                        try:
-                            player_stats_list = collector.collect_player_stats(game_id)
-                            if player_stats_list:
-                                for player_stat in player_stats_list:
-                                    db_manager.insert_player_stats(player_stat)
+                            
+                            # Store player stats
+                            for player_stat in stats_result['player_stats']:
+                                db_manager.insert_player_stats(player_stat)
+                            if stats_result['player_stats']:
                                 stats['games_with_player_stats'] += 1
                         except Exception as e:
-                            logger.warning(f"Error collecting player stats for {game_id}: {e}")
+                            logger.warning(f"Error collecting stats for {game_id}: {e}")
                     else:
+                        stats['games_with_team_stats'] += 1
                         stats['games_with_player_stats'] += 1
                 
             else:

@@ -117,4 +117,3 @@ def test_small_collection():
 
 if __name__ == "__main__":
     test_small_collection()
-
