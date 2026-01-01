@@ -2,10 +2,10 @@
 
 import logging
 import numpy as np
-from typing import Optional, List
+from typing import Optional, List, Dict
 from datetime import date
 from src.database.db_manager import DatabaseManager
-from src.database.models import TeamStats, Game
+from src.database.models import TeamStats, Game, PlayerStats
 from config.settings import get_settings
 
 logger = logging.getLogger(__name__)
@@ -523,6 +523,240 @@ class TeamFeatureCalculator:
         
         avg_points_allowed = total_points_allowed / len(stats_history)
         return round(avg_points_allowed, 2)
+    
+    def calculate_current_streak(
+        self,
+        team_id: str,
+        end_date: Optional[date] = None
+    ) -> Dict[str, int]:
+        """
+        Calculate current win/loss streak.
+        
+        Args:
+            team_id: Team identifier
+            end_date: Cutoff date (to avoid data leakage)
+            
+        Returns:
+            Dictionary with 'win_streak' and 'loss_streak' (one will be 0)
+        """
+        games = self.db_manager.get_games(
+            team_id=team_id,
+            end_date=end_date,
+            limit=20  # Check last 20 games
+        )
+        
+        games = sorted(games, key=lambda x: x.game_date, reverse=True)
+        
+        if not games:
+            return {'win_streak': 0, 'loss_streak': 0}
+        
+        streak_type = None
+        streak_count = 0
+        
+        for game in games:
+            if not game.winner:
+                break
+            
+            if game.winner == team_id:
+                if streak_type == 'win' or streak_type is None:
+                    streak_type = 'win'
+                    streak_count += 1
+                else:
+                    break
+            else:
+                if streak_type == 'loss' or streak_type is None:
+                    streak_type = 'loss'
+                    streak_count += 1
+                else:
+                    break
+        
+        if streak_type == 'win':
+            return {'win_streak': streak_count, 'loss_streak': 0}
+        else:
+            return {'win_streak': 0, 'loss_streak': streak_count}
+    
+    def calculate_injury_impact(
+        self,
+        team_id: str,
+        end_date: Optional[date] = None
+    ) -> Dict[str, Optional[float]]:
+        """
+        Calculate team injury impact based on player stats.
+        
+        Args:
+            team_id: Team identifier
+            end_date: Cutoff date (to avoid data leakage)
+            
+        Returns:
+            Dictionary with injury metrics
+        """
+        # Get most recent game before end_date
+        games = self.db_manager.get_games(
+            team_id=team_id,
+            end_date=end_date,
+            limit=1
+        )
+        
+        if not games:
+            return {
+                'players_out': None,
+                'players_questionable': None,
+                'injury_severity_score': None
+            }
+        
+        most_recent_game = games[0]
+        
+        # Get player stats for this game
+        with self.db_manager.get_session() as session:
+            player_stats = session.query(PlayerStats).filter_by(
+                game_id=most_recent_game.game_id,
+                team_id=team_id
+            ).all()
+        
+        players_out = 0
+        players_questionable = 0
+        total_players = len(player_stats)
+        
+        for player in player_stats:
+            if player.injury_status == 'out':
+                players_out += 1
+            elif player.injury_status == 'questionable':
+                players_questionable += 1
+        
+        # Calculate severity score (0-1, higher = more injured)
+        if total_players == 0:
+            severity = None
+        else:
+            severity = (players_out * 1.0 + players_questionable * 0.5) / total_players
+        
+        return {
+            'players_out': players_out,
+            'players_questionable': players_questionable,
+            'injury_severity_score': round(severity, 3) if severity is not None else None
+        }
+    
+    def calculate_assist_rate(
+        self,
+        team_id: str,
+        games_back: int = None,
+        end_date: Optional[date] = None
+    ) -> Optional[float]:
+        """
+        Calculate assist rate (assists per 100 possessions).
+        
+        Args:
+            team_id: Team identifier
+            games_back: Number of recent games to consider
+            end_date: Cutoff date (to avoid data leakage)
+            
+        Returns:
+            Assist rate or None if insufficient data
+        """
+        if games_back is None:
+            games_back = self.default_games_back
+        
+        stats_history = self.db_manager.get_team_stats_history(
+            team_id, games_back, end_date
+        )
+        
+        if len(stats_history) < 3:
+            return None
+        
+        total_assists = 0
+        total_possessions = 0
+        
+        for stat in stats_history:
+            total_assists += stat.assists
+            possessions = self._calculate_possessions(stat)
+            total_possessions += possessions
+        
+        if total_possessions == 0:
+            return None
+        
+        assist_rate = (total_assists / total_possessions) * 100
+        return round(assist_rate, 2)
+    
+    def calculate_steal_rate(
+        self,
+        team_id: str,
+        games_back: int = None,
+        end_date: Optional[date] = None
+    ) -> Optional[float]:
+        """
+        Calculate steal rate (steals per 100 possessions).
+        
+        Args:
+            team_id: Team identifier
+            games_back: Number of recent games to consider
+            end_date: Cutoff date (to avoid data leakage)
+            
+        Returns:
+            Steal rate or None if insufficient data
+        """
+        if games_back is None:
+            games_back = self.default_games_back
+        
+        stats_history = self.db_manager.get_team_stats_history(
+            team_id, games_back, end_date
+        )
+        
+        if len(stats_history) < 3:
+            return None
+        
+        total_steals = 0
+        total_possessions = 0
+        
+        for stat in stats_history:
+            total_steals += stat.steals
+            possessions = self._calculate_possessions(stat)
+            total_possessions += possessions
+        
+        if total_possessions == 0:
+            return None
+        
+        steal_rate = (total_steals / total_possessions) * 100
+        return round(steal_rate, 2)
+    
+    def calculate_block_rate(
+        self,
+        team_id: str,
+        games_back: int = None,
+        end_date: Optional[date] = None
+    ) -> Optional[float]:
+        """
+        Calculate block rate (blocks per 100 possessions).
+        
+        Args:
+            team_id: Team identifier
+            games_back: Number of recent games to consider
+            end_date: Cutoff date (to avoid data leakage)
+            
+        Returns:
+            Block rate or None if insufficient data
+        """
+        if games_back is None:
+            games_back = self.default_games_back
+        
+        stats_history = self.db_manager.get_team_stats_history(
+            team_id, games_back, end_date
+        )
+        
+        if len(stats_history) < 3:
+            return None
+        
+        total_blocks = 0
+        total_possessions = 0
+        
+        for stat in stats_history:
+            total_blocks += stat.blocks
+            possessions = self._calculate_possessions(stat)
+            total_possessions += possessions
+        
+        if total_possessions == 0:
+            return None
+        
+        block_rate = (total_blocks / total_possessions) * 100
+        return round(block_rate, 2)
     
     def _calculate_possessions(self, stat: TeamStats) -> float:
         """

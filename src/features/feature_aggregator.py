@@ -168,6 +168,27 @@ class FeatureAggregator:
         avg_points_against = self.team_calc.calculate_avg_points_against(team_id, games_back, end_date)
         features[f'{prefix}avg_points_against'] = avg_points_against
         
+        # Win/loss streaks
+        streak = self.team_calc.calculate_current_streak(team_id, end_date)
+        features[f'{prefix}win_streak'] = streak.get('win_streak', 0)
+        features[f'{prefix}loss_streak'] = streak.get('loss_streak', 0)
+        
+        # Injury impact
+        injury = self.team_calc.calculate_injury_impact(team_id, end_date)
+        features[f'{prefix}players_out'] = injury.get('players_out')
+        features[f'{prefix}players_questionable'] = injury.get('players_questionable')
+        features[f'{prefix}injury_severity_score'] = injury.get('injury_severity_score')
+        
+        # Advanced stats
+        assist_rate = self.team_calc.calculate_assist_rate(team_id, games_back, end_date)
+        features[f'{prefix}assist_rate'] = assist_rate
+        
+        steal_rate = self.team_calc.calculate_steal_rate(team_id, games_back, end_date)
+        features[f'{prefix}steal_rate'] = steal_rate
+        
+        block_rate = self.team_calc.calculate_block_rate(team_id, games_back, end_date)
+        features[f'{prefix}block_rate'] = block_rate
+        
         return features
     
     def _calculate_matchup_features(
@@ -273,7 +294,9 @@ class FeatureAggregator:
             'away_moneyline_prob': betting_features.get('away_moneyline_prob'),
             'spread_implied_prob': betting_features.get('spread_implied_prob'),
             'over_implied_prob': betting_features.get('over_implied_prob'),
-            'under_implied_prob': betting_features.get('under_implied_prob')
+            'under_implied_prob': betting_features.get('under_implied_prob'),
+            'spread_movement': betting_features.get('spread_movement'),
+            'total_movement': betting_features.get('total_movement')
         }
         
         return features
@@ -284,49 +307,75 @@ class FeatureAggregator:
         features: Dict[str, Any]
     ) -> None:
         """
-        Save features to database.
+        Save features to database using batch insert for efficiency.
         
         Args:
             game_id: Game identifier
             features: Dictionary of feature names and values
         """
         try:
+            # Get game once (cache it to avoid multiple queries)
+            game = self.db_manager.get_game(game_id)
+            if not game:
+                logger.warning(f"Game {game_id} not found, cannot save features")
+                return
+            
+            # Prepare all feature data in one batch
+            feature_records = []
+            
             for feature_name, feature_value in features.items():
                 # Determine category
                 if feature_name.startswith('home_') or feature_name.startswith('away_'):
                     category = 'team'
-                    # Extract team_id from feature name if possible
-                    team_id = None
-                    if feature_name.startswith('home_'):
-                        game = self.db_manager.get_game(game_id)
-                        team_id = game.home_team_id if game else None
-                    elif feature_name.startswith('away_'):
-                        game = self.db_manager.get_game(game_id)
-                        team_id = game.away_team_id if game else None
+                    # Extract team_id from feature name
+                    team_id = game.home_team_id if feature_name.startswith('home_') else game.away_team_id
                 elif feature_name.startswith('h2h_') or 'differential' in feature_name:
                     category = 'matchup'
                     team_id = None
-                elif feature_name.startswith('consensus_') or 'moneyline' in feature_name or 'implied' in feature_name:
+                elif feature_name.startswith('consensus_') or 'moneyline' in feature_name or 'implied' in feature_name or 'movement' in feature_name:
                     category = 'betting'
                     team_id = None
                 else:
                     category = 'contextual'
                     team_id = None
                 
-                feature_data = {
+                feature_records.append({
                     'game_id': game_id,
                     'feature_name': feature_name,
                     'feature_value': feature_value if feature_value is not None else None,
                     'feature_category': category,
                     'team_id': team_id
-                }
+                })
+            
+            # Batch insert/update in a single session
+            with self.db_manager.get_session() as session:
+                from src.database.models import Feature
                 
-                self.db_manager.insert_feature(feature_data)
+                for feature_data in feature_records:
+                    # Check if feature exists
+                    feature = session.query(Feature).filter_by(
+                        game_id=feature_data['game_id'],
+                        feature_name=feature_data['feature_name']
+                    ).first()
+                    
+                    if feature:
+                        # Update existing
+                        feature.feature_value = feature_data['feature_value']
+                        feature.feature_category = feature_data['feature_category']
+                        feature.team_id = feature_data['team_id']
+                    else:
+                        # Create new
+                        feature = Feature(**feature_data)
+                        session.add(feature)
+                
+                # Single commit for all features
+                session.commit()
             
             logger.debug(f"Saved {len(features)} features to database for game {game_id}")
             
         except Exception as e:
             logger.error(f"Error saving features to database: {e}")
+            raise  # Re-raise to handle in calling code
     
     def get_features_from_db(
         self,

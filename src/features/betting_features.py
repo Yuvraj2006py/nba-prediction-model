@@ -196,6 +196,49 @@ class BettingFeatureCalculator:
         ev = (model_prob * decimal_odds) - 1.0
         return round(ev, 4)
     
+    def get_line_movement(
+        self,
+        game_id: str
+    ) -> Optional[Dict[str, float]]:
+        """
+        Calculate line movement (opening vs closing line).
+        
+        Args:
+            game_id: Game identifier
+            
+        Returns:
+            Dictionary with spread_movement and total_movement, or None if insufficient data
+        """
+        betting_lines = self.db_manager.get_betting_lines(game_id)
+        
+        if not betting_lines or len(betting_lines) < 2:
+            return None
+        
+        # Sort by timestamp
+        sorted_lines = sorted(betting_lines, key=lambda x: x.timestamp)
+        opening = sorted_lines[0]
+        closing = sorted_lines[-1]
+        
+        spread_movement = None
+        if opening.point_spread_home is not None and closing.point_spread_home is not None:
+            spread_movement = closing.point_spread_home - opening.point_spread_home
+        
+        total_movement = None
+        if opening.over_under is not None and closing.over_under is not None:
+            total_movement = closing.over_under - opening.over_under
+        
+        # Only return if we have at least one movement value
+        if spread_movement is None and total_movement is None:
+            return None
+        
+        result = {}
+        if spread_movement is not None:
+            result['spread_movement'] = round(spread_movement, 2)
+        if total_movement is not None:
+            result['total_movement'] = round(total_movement, 2)
+        
+        return result
+    
     def get_all_betting_features(
         self,
         game_id: str,
@@ -218,7 +261,10 @@ class BettingFeatureCalculator:
         home_ml_prob = self.get_moneyline_implied_prob(game_id, home_team_id)
         away_ml_prob = self.get_moneyline_implied_prob(game_id, away_team_id)
         
-        return {
+        # Get line movement
+        line_movement = self.get_line_movement(game_id)
+        
+        features = {
             'consensus_spread': consensus_spread,
             'consensus_total': consensus_total,
             'home_moneyline_prob': home_ml_prob,
@@ -227,6 +273,16 @@ class BettingFeatureCalculator:
             'over_implied_prob': self.get_total_implied_prob(game_id, over=True),
             'under_implied_prob': self.get_total_implied_prob(game_id, over=False)
         }
+        
+        # Add line movement if available
+        if line_movement:
+            features['spread_movement'] = line_movement.get('spread_movement')
+            features['total_movement'] = line_movement.get('total_movement')
+        else:
+            features['spread_movement'] = None
+            features['total_movement'] = None
+        
+        return features
     
     def _american_to_probability(self, american_odds: int) -> Optional[float]:
         """
