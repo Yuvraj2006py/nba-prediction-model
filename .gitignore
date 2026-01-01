@@ -48,6 +48,9 @@ data/models/*
 !data/raw/.gitkeep
 !data/processed/.gitkeep
 !data/models/.gitkeep
+# Allow CSV files in data/raw/csv
+!data/raw/csv/
+!data/raw/csv/**/*.csv
 
 # Logs
 *.log
