@@ -78,3 +78,16 @@ htmlcov/
 *.temp
 temp/
 
+# Debug files
+*_debug.html
+*_debug.py
+debug_*.py
+
+# Generated reports
+*_report.json
+quality_check_report.json
+
+# One-time inspection/validation scripts (keep locally but don't commit)
+inspect_*.py
+verify_*.py
+poc_*.py
