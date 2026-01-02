@@ -22,7 +22,7 @@ from datetime import date, timedelta
 from argparse import ArgumentParser
 from src.database.db_manager import DatabaseManager
 from src.prediction.prediction_service import PredictionService
-from src.database.models import Game
+from src.database.models import Game, Prediction
 
 def get_team_name(team_id: str, db: DatabaseManager) -> str:
     """Get team name from team ID."""
@@ -31,7 +31,8 @@ def get_team_name(team_id: str, db: DatabaseManager) -> str:
         return f"{team.team_name} ({team.team_abbreviation})"
     return team_id
 
-def predict_games_for_date(target_date: date, db: DatabaseManager, prediction_service: PredictionService):
+def predict_games_for_date(target_date: date, db: DatabaseManager, prediction_service: PredictionService, 
+                           save_to_db: bool = False, quiet: bool = False):
     """Predict all games for a specific date."""
     today_str = target_date.strftime('%Y%m%d')
     
@@ -48,14 +49,16 @@ def predict_games_for_date(target_date: date, db: DatabaseManager, prediction_se
     # (This handles cases where game_id might have wrong prefix but date is correct)
     if not verified_games:
         verified_games = games
-        if verified_games:
+        if verified_games and not quiet:
             print(f"  Note: Found {len(verified_games)} games by date (game_id prefix check skipped)")
     
     if not verified_games:
-        print(f"  No games found for {target_date}")
+        if not quiet:
+            print(f"  No games found for {target_date}")
         return []
     
     predictions = []
+    saved_count = 0
     for game in verified_games:
         try:
             result = prediction_service.predict_game(
@@ -66,8 +69,21 @@ def predict_games_for_date(target_date: date, db: DatabaseManager, prediction_se
             
             if result:
                 predictions.append((game, result))
+                
+                # Save prediction to database if requested
+                if save_to_db:
+                    try:
+                        prediction_service.save_prediction(result, model_name='nba_v2_classifier')
+                        saved_count += 1
+                    except Exception as e:
+                        if not quiet:
+                            print(f"  Warning: Could not save prediction for {game.game_id}: {e}")
         except Exception as e:
-            print(f"  Error predicting {game.game_id}: {e}")
+            if not quiet:
+                print(f"  Error predicting {game.game_id}: {e}")
+    
+    if save_to_db and not quiet:
+        print(f"  Saved {saved_count} predictions to database")
     
     return predictions
 
@@ -78,6 +94,10 @@ def main():
     parser.add_argument('--days', type=int, help='Number of days ahead to predict (from today)')
     parser.add_argument('--date-range', nargs=2, metavar=('START', 'END'), 
                        help='Date range to predict (YYYY-MM-DD YYYY-MM-DD)')
+    parser.add_argument('--save', action='store_true',
+                       help='Save predictions to database for later evaluation')
+    parser.add_argument('--quiet', action='store_true',
+                       help='Suppress detailed output (for automation)')
     args = parser.parse_args()
     
     # Determine target dates
@@ -115,45 +135,56 @@ def main():
     all_predictions = []
     
     for target_date in target_dates:
-        print(f"\n[{target_date}]")
-        print("-" * 70)
+        if not args.quiet:
+            print(f"\n[{target_date}]")
+            print("-" * 70)
         
-        predictions = predict_games_for_date(target_date, db, prediction_service)
+        predictions = predict_games_for_date(target_date, db, prediction_service, 
+                                              save_to_db=args.save, quiet=args.quiet)
         
         if not predictions:
-            print(f"  No games to predict for {target_date}")
+            if not args.quiet:
+                print(f"  No games to predict for {target_date}")
             continue
         
-        for i, (game, result) in enumerate(predictions, 1):
-            away_name = get_team_name(game.away_team_id, db)
-            home_name = get_team_name(game.home_team_id, db)
-            winner_name = get_team_name(result['predicted_winner'], db)
+        if not args.quiet:
+            for i, (game, result) in enumerate(predictions, 1):
+                away_name = get_team_name(game.away_team_id, db)
+                home_name = get_team_name(game.home_team_id, db)
+                winner_name = get_team_name(result['predicted_winner'], db)
+                
+                print(f'\n  [{i}] {away_name} @ {home_name}')
+                print(f'      Game ID: {game.game_id}')
+                print(f'      Winner: {winner_name}')
+                print(f'      Home Win Prob: {result["win_probability_home"]:.1%}')
+                print(f'      Away Win Prob: {result["win_probability_away"]:.1%}')
+                print(f'      Confidence: {result["confidence"]:.1%}')
+                
+                if result.get('predicted_point_differential') is not None:
+                    diff = result['predicted_point_differential']
+                    if diff > 0:
+                        print(f'      Margin: {home_name} by {diff:.1f} pts')
+                    elif diff < 0:
+                        print(f'      Margin: {away_name} by {abs(diff):.1f} pts')
+                    else:
+                        print(f'      Margin: Tie')
             
-            print(f'\n  [{i}] {away_name} @ {home_name}')
-            print(f'      Game ID: {game.game_id}')
-            print(f'      Winner: {winner_name}')
-            print(f'      Home Win Prob: {result["win_probability_home"]:.1%}')
-            print(f'      Away Win Prob: {result["win_probability_away"]:.1%}')
-            print(f'      Confidence: {result["confidence"]:.1%}')
-            
-            if result.get('predicted_point_differential') is not None:
-                diff = result['predicted_point_differential']
-                if diff > 0:
-                    print(f'      Margin: {home_name} by {diff:.1f} pts')
-                elif diff < 0:
-                    print(f'      Margin: {away_name} by {abs(diff):.1f} pts')
-                else:
-                    print(f'      Margin: Tie')
+            print(f"\n  Total: {len(predictions)} predictions for {target_date}")
         
         all_predictions.extend(predictions)
-        print(f"\n  Total: {len(predictions)} predictions for {target_date}")
     
-    print("\n" + "=" * 70)
-    print(f"SUMMARY")
-    print("=" * 70)
-    print(f"Total predictions: {len(all_predictions)}")
-    print(f"Dates covered: {len(target_dates)}")
-    print("=" * 70)
+    if not args.quiet:
+        print("\n" + "=" * 70)
+        print(f"SUMMARY")
+        print("=" * 70)
+        print(f"Total predictions: {len(all_predictions)}")
+        print(f"Dates covered: {len(target_dates)}")
+        if args.save:
+            print(f"Predictions saved to database: Yes")
+        print("=" * 70)
+    else:
+        # Minimal output for automation
+        print(f"Predicted {len(all_predictions)} games for {len(target_dates)} date(s)")
 
 if __name__ == '__main__':
     main()

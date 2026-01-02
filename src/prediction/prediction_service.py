@@ -473,7 +473,8 @@ class PredictionService:
     def save_prediction(
         self,
         prediction: Dict[str, Any],
-        model_name: Optional[str] = None
+        model_name: Optional[str] = None,
+        update_existing: bool = True
     ) -> int:
         """
         Save prediction to database.
@@ -481,23 +482,48 @@ class PredictionService:
         Args:
             prediction: Prediction dictionary
             model_name: Model name to use (overrides prediction['model_name'])
+            update_existing: If True, update existing prediction instead of failing
             
         Returns:
-            Prediction ID
+            Prediction ID (or 0 if skipped)
         """
+        game_id = prediction['game_id']
+        model = model_name or prediction.get('model_name', 'unknown')
+        
         with self.db_manager.get_session() as session:
-            pred = Prediction(
-                game_id=prediction['game_id'],
-                model_name=model_name or prediction.get('model_name', 'unknown'),
-                predicted_winner=prediction.get('predicted_winner'),
-                win_probability_home=prediction['win_probability_home'],
-                win_probability_away=prediction['win_probability_away'],
-                predicted_point_differential=prediction.get('predicted_point_differential'),
-                confidence=prediction['confidence']
-            )
-            session.add(pred)
-            session.commit()
-            return pred.id
+            # Check if prediction already exists
+            existing = session.query(Prediction).filter_by(
+                game_id=game_id,
+                model_name=model
+            ).first()
+            
+            if existing:
+                if update_existing:
+                    # Update existing prediction
+                    existing.predicted_winner = prediction.get('predicted_winner')
+                    existing.win_probability_home = prediction['win_probability_home']
+                    existing.win_probability_away = prediction['win_probability_away']
+                    existing.predicted_point_differential = prediction.get('predicted_point_differential')
+                    existing.confidence = prediction['confidence']
+                    session.commit()
+                    return existing.id
+                else:
+                    # Skip if already exists
+                    return 0
+            else:
+                # Create new prediction
+                pred = Prediction(
+                    game_id=game_id,
+                    model_name=model,
+                    predicted_winner=prediction.get('predicted_winner'),
+                    win_probability_home=prediction['win_probability_home'],
+                    win_probability_away=prediction['win_probability_away'],
+                    predicted_point_differential=prediction.get('predicted_point_differential'),
+                    confidence=prediction['confidence']
+                )
+                session.add(pred)
+                session.commit()
+                return pred.id
     
     def get_upcoming_games(
         self,
