@@ -1,0 +1,65 @@
+{
+  "timestamp": "2026-01-01T23:49:50.515165",
+  "models_trained": 1,
+  "training_results": {
+    "nba_test_classification": {
+      "model_name": "nba_test_classification",
+      "task_type": "classification",
+      "training_metrics": {
+        "status": "trained",
+        "n_samples": 3677,
+        "n_features": 63,
+        "train_accuracy": 0.9526788142507479,
+        "train_precision": 0.970956434651978,
+        "train_recall": 0.9435523114355231,
+        "train_f1": 0.9570582428430404,
+        "train_top_features": {
+          "home_net_rating": 0.07042762637138367,
+          "away_net_rating": 0.05847705155611038,
+          "h2h_away_avg_score": 0.05227769911289215,
+          "h2h_home_avg_score": 0.03878278285264969,
+          "ts_differential": 0.03840235620737076,
+          "efg_differential": 0.03661777824163437,
+          "away_avg_points_for": 0.028456667438149452,
+          "home_avg_points_against": 0.027627984061837196,
+          "home_defensive_rating": 0.027431217953562737,
+          "away_offensive_rating": 0.026769626885652542
+        },
+        "val_accuracy": NaN,
+        "val_precision": 0.0,
+        "val_recall": 0.0,
+        "val_f1": 0.0,
+        "val_top_features": {
+          "home_net_rating": 0.07042762637138367,
+          "away_net_rating": 0.05847705155611038,
+          "h2h_away_avg_score": 0.05227769911289215,
+          "h2h_home_avg_score": 0.03878278285264969,
+          "ts_differential": 0.03840235620737076,
+          "efg_differential": 0.03661777824163437,
+          "away_avg_points_for": 0.028456667438149452,
+          "home_avg_points_against": 0.027627984061837196,
+          "home_defensive_rating": 0.027431217953562737,
+          "away_offensive_rating": 0.026769626885652542
+        }
+      },
+      "train_samples": 3677,
+      "val_samples": 0,
+      "test_samples": 0,
+      "test_metrics": {
+        "test_accuracy": NaN,
+        "test_precision": 0.0,
+        "test_recall": 0.0,
+        "test_f1": 0.0,
+        "test_roc_auc": null,
+        "test_log_loss": null
+      },
+      "test_accuracy": NaN,
+      "test_precision": 0.0,
+      "test_recall": 0.0,
+      "test_f1": 0.0,
+      "test_roc_auc": null,
+      "test_log_loss": null,
+      "model_path": "C:\\Users\\yuvi2\\Downloads\\nba-prediction-model\\data\\models\\nba_test_classification.pkl"
+    }
+  }
+}

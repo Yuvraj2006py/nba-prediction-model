@@ -612,16 +612,65 @@ def parse_schedule_csv(csv_path: Path, season: str) -> List[Dict[str, Any]]:
             f.seek(0)
             
             # Basketball Reference CSVs are typically comma-delimited
-            reader = csv.DictReader(f)
+            # Use csv.reader first to get raw rows, then parse headers manually
+            # to handle duplicate column names (e.g., 'PTS' appears twice)
+            reader = csv.reader(f)
+            header_row = next(reader)
+            
+            # Find column indices
+            col_indices = {}
+            for idx, col_name in enumerate(header_row):
+                if col_name not in col_indices:
+                    col_indices[col_name] = []
+                col_indices[col_name].append(idx)
+            
+            # Find score column indices - handle duplicate 'PTS' columns
+            visitor_pts_idx = None
+            home_pts_idx = None
+            
+            # Find visitor score column (first 'PTS' after 'Visitor/Neutral')
+            if 'Visitor/Neutral' in col_indices:
+                visitor_col_idx = col_indices['Visitor/Neutral'][0]
+                # Look for 'PTS' column that comes after visitor team column
+                for idx, col_name in enumerate(header_row):
+                    if col_name == 'PTS' and idx > visitor_col_idx:
+                        visitor_pts_idx = idx
+                        break
+            
+            # Find home score column (second 'PTS' after 'Home/Neutral')
+            if 'Home/Neutral' in col_indices:
+                home_col_idx = col_indices['Home/Neutral'][0]
+                # Look for 'PTS' column that comes after home team column
+                for idx, col_name in enumerate(header_row):
+                    if col_name == 'PTS' and idx > home_col_idx and idx != visitor_pts_idx:
+                        home_pts_idx = idx
+                        break
+            
+            # Fallback: if we can't find by position, use first and second 'PTS' columns
+            if visitor_pts_idx is None or home_pts_idx is None:
+                pts_indices = [idx for idx, col_name in enumerate(header_row) if col_name == 'PTS']
+                if len(pts_indices) >= 2:
+                    visitor_pts_idx = pts_indices[0]
+                    home_pts_idx = pts_indices[1]
+                elif len(pts_indices) == 1:
+                    visitor_pts_idx = pts_indices[0]
+                    # Try to find home score in other columns
+                    for idx, col_name in enumerate(header_row):
+                        if col_name in ['PTS.1', 'Home PTS', 'Home/Neutral PTS']:
+                            home_pts_idx = idx
+                            break
             
             for row_idx, row in enumerate(reader):
                 try:
                     # Skip empty rows
-                    if not any(row.values()):
+                    if not any(row):
                         continue
                     
                     # Extract date
-                    date_str = row.get('Date', '').strip()
+                    date_idx = col_indices.get('Date', [None])[0]
+                    if date_idx is None or date_idx >= len(row):
+                        continue
+                    date_str = row[date_idx].strip() if date_idx < len(row) else ''
                     if not date_str:
                         continue
                     
@@ -640,12 +689,18 @@ def parse_schedule_csv(csv_path: Path, season: str) -> List[Dict[str, Any]]:
                         continue
                     
                     # Extract visitor team
-                    visitor_str = row.get('Visitor/Neutral', '').strip() or row.get('Visitor', '').strip()
+                    visitor_idx = col_indices.get('Visitor/Neutral', col_indices.get('Visitor', [None]))[0]
+                    if visitor_idx is None or visitor_idx >= len(row):
+                        continue
+                    visitor_str = row[visitor_idx].strip() if visitor_idx < len(row) else ''
                     if not visitor_str:
                         continue
                     
                     # Extract home team
-                    home_str = row.get('Home/Neutral', '').strip() or row.get('Home', '').strip()
+                    home_idx = col_indices.get('Home/Neutral', col_indices.get('Home', [None]))[0]
+                    if home_idx is None or home_idx >= len(row):
+                        continue
+                    home_str = row[home_idx].strip() if home_idx < len(row) else ''
                     if not home_str:
                         continue
                     
@@ -687,33 +742,52 @@ def parse_schedule_csv(csv_path: Path, season: str) -> List[Dict[str, Any]]:
                     away_team_id = away_team_data[0]
                     home_team_id = home_team_data[0]
                     
-                    # Extract scores
-                    # Column names might be: PTS, Visitor PTS, Home PTS, etc.
+                    # Extract scores using positional indices
                     away_score = None
                     home_score = None
                     
-                    # Try different column name variations
-                    for col_name in ['PTS', 'Visitor PTS', 'Visitor/Neutral PTS', 'Away PTS']:
-                        if col_name in row and row[col_name].strip().isdigit():
-                            away_score = int(row[col_name].strip())
-                            break
+                    # Extract visitor score from first PTS column
+                    if visitor_pts_idx is not None and visitor_pts_idx < len(row):
+                        score_str = row[visitor_pts_idx].strip()
+                        if score_str and score_str.isdigit():
+                            away_score = int(score_str)
                     
-                    for col_name in ['PTS.1', 'Home PTS', 'Home/Neutral PTS']:
-                        if col_name in row and row[col_name].strip().isdigit():
-                            home_score = int(row[col_name].strip())
-                            break
+                    # Extract home score from second PTS column
+                    if home_pts_idx is not None and home_pts_idx < len(row):
+                        score_str = row[home_pts_idx].strip()
+                        if score_str and score_str.isdigit():
+                            home_score = int(score_str)
                     
-                    # If scores not found, try to find any numeric columns that look like scores
+                    # Fallback: if positional extraction failed, try column name lookup
                     if away_score is None or home_score is None:
-                        for key, value in row.items():
-                            if value and value.strip().isdigit():
-                                score_val = int(value.strip())
-                                if 50 <= score_val <= 200:  # Reasonable score range
-                                    if away_score is None:
-                                        away_score = score_val
-                                    elif home_score is None:
-                                        home_score = score_val
-                                        break
+                        # Convert row to dict for fallback (but be aware of duplicate keys)
+                        row_dict = dict(zip(header_row, row))
+                        
+                        # Try different column name variations for visitor
+                        if away_score is None:
+                            for col_name in ['PTS', 'Visitor PTS', 'Visitor/Neutral PTS', 'Away PTS']:
+                                if col_name in row_dict and row_dict[col_name].strip().isdigit():
+                                    away_score = int(row_dict[col_name].strip())
+                                    break
+                        
+                        # Try different column name variations for home
+                        if home_score is None:
+                            for col_name in ['PTS.1', 'Home PTS', 'Home/Neutral PTS']:
+                                if col_name in row_dict and row_dict[col_name].strip().isdigit():
+                                    home_score = int(row_dict[col_name].strip())
+                                    break
+                        
+                        # Last resort: find any numeric values that look like scores
+                        if away_score is None or home_score is None:
+                            for idx, value in enumerate(row):
+                                if value and value.strip().isdigit():
+                                    score_val = int(value.strip())
+                                    if 50 <= score_val <= 200:  # Reasonable score range
+                                        if away_score is None:
+                                            away_score = score_val
+                                        elif home_score is None:
+                                            home_score = score_val
+                                            break
                     
                     # Determine season type from context (Regular Season by default)
                     season_type = 'Regular Season'

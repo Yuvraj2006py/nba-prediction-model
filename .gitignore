@@ -56,16 +56,19 @@ data/models/*
 *.log
 logs/
 
-# Database
+# Database - Allow main database and models for syncing
 *.db
 *.sqlite
 *.sqlite3
+!data/nba_predictions.db
 
-# Model files
+# Model files - Allow trained models for syncing
 *.pkl
 *.joblib
 *.h5
 *.model
+!data/models/*.pkl
+!data/models/*.json
 
 # OS
 .DS_Store

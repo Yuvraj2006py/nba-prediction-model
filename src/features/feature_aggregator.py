@@ -45,7 +45,8 @@ class FeatureAggregator:
         away_team_id: str,
         end_date: Optional[date] = None,
         games_back: int = None,
-        use_cache: bool = True
+        use_cache: bool = True,
+        include_betting_features: bool = False
     ) -> pd.DataFrame:
         """
         Create feature vector for a game by combining all feature calculators.
@@ -95,8 +96,9 @@ class FeatureAggregator:
         # Contextual features
         features.update(self._calculate_contextual_features(game_id, home_team_id, away_team_id, end_date))
         
-        # Betting features
-        features.update(self._calculate_betting_features(game_id, home_team_id, away_team_id))
+        # Betting features (optional - excluded for pure statistical model)
+        if include_betting_features:
+            features.update(self._calculate_betting_features(game_id, home_team_id, away_team_id))
         
         # Create DataFrame
         feature_df = pd.DataFrame([features])

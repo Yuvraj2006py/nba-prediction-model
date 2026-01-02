@@ -1,2 +1,5 @@
-"""Monitoring and performance tracking modules."""
+"""Monitoring and alerting modules."""
 
+from src.monitoring.prediction_monitor import PredictionMonitor
+
+__all__ = ['PredictionMonitor']

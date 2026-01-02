@@ -4,7 +4,7 @@ import time
 import logging
 import requests
 from typing import List, Dict, Any, Optional
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 from config.settings import get_settings
 from src.database.db_manager import DatabaseManager
 
@@ -206,6 +206,114 @@ class BettingOddsCollector:
             logger.warning(f"Failed to fetch NBA odds for {target_date}")
             return []
     
+    def fetch_odds_for_existing_games(self, game_date: date) -> int:
+        """
+        Fetch odds for games that already exist in database but don't have odds.
+        This tries to match existing games with odds from the API.
+        
+        Args:
+            game_date: Date to fetch odds for
+            
+        Returns:
+            Number of betting lines stored
+        """
+        # First, get all odds for the date
+        odds_data = self.get_odds_for_date(game_date)
+        if not odds_data:
+            logger.info(f"No odds data available for {game_date}")
+            return 0
+        
+        # Get all games for this date that don't have odds
+        from src.database.models import Game, BettingLine, Team
+        with self.db_manager.get_session() as session:
+            games_without_odds = session.query(Game).filter(
+                Game.game_date == game_date,
+                Game.home_score.is_(None)  # Not finished
+            ).outerjoin(
+                BettingLine, Game.game_id == BettingLine.game_id
+            ).filter(
+                BettingLine.id.is_(None)  # No betting lines
+            ).all()
+        
+        if not games_without_odds:
+            logger.info(f"All games for {game_date} already have odds")
+            return 0
+        
+        logger.info(f"Found {len(games_without_odds)} games without odds, trying to match with API data...")
+        
+        # Try to match games with odds data
+        from src.backtesting.team_mapper import TeamMapper
+        team_mapper = TeamMapper(self.db_manager)
+        matched_count = 0
+        
+        with self.db_manager.get_session() as session:
+            for game in games_without_odds:
+                # Get team names
+                home_team = session.query(Team).filter_by(team_id=game.home_team_id).first()
+                away_team = session.query(Team).filter_by(team_id=game.away_team_id).first()
+                
+                if not home_team or not away_team:
+                    continue
+                
+                # Try to find matching odds data
+                for odds_item in odds_data:
+                    api_home = odds_item.get('home_team', '')
+                    api_away = odds_item.get('away_team', '')
+                    
+                    # Check if teams match (try various name formats)
+                    home_match = (
+                        api_home.lower() == home_team.team_name.lower() or
+                        api_home.lower() == home_team.city.lower() or
+                        api_home.lower() in home_team.team_name.lower() or
+                        home_team.team_name.lower() in api_home.lower()
+                    )
+                    
+                    away_match = (
+                        api_away.lower() == away_team.team_name.lower() or
+                        api_away.lower() == away_team.city.lower() or
+                        api_away.lower() in away_team.team_name.lower() or
+                        away_team.team_name.lower() in api_away.lower()
+                    )
+                    
+                    if home_match and away_match:
+                        # Found a match! Store odds for this game
+                        logger.info(f"Matched odds for {away_team.team_name} @ {home_team.team_name}")
+                        stored = self._store_odds_for_game(game.game_id, odds_item)
+                        if stored > 0:
+                            matched_count += stored
+                        break
+        
+        logger.info(f"Matched and stored odds for {matched_count} additional betting lines")
+        return matched_count
+    
+    def _store_odds_for_game(self, game_id: str, odds_data: Dict[str, Any]) -> int:
+        """Store odds data for a specific game."""
+        stored_count = 0
+        
+        try:
+            bookmakers = odds_data.get('bookmakers', [])
+            for bookmaker in bookmakers:
+                sportsbook = bookmaker.get('key', 'unknown')
+                markets = bookmaker.get('markets', [])
+                
+                for market in markets:
+                    line_data = self._extract_betting_line(
+                        game_id,
+                        sportsbook,
+                        market
+                    )
+                    if line_data:
+                        try:
+                            self.db_manager.insert_betting_line(line_data)
+                            stored_count += 1
+                        except Exception as e:
+                            logger.debug(f"Betting line already exists or error: {e}")
+            
+            return stored_count
+        except Exception as e:
+            logger.error(f"Error storing odds for game {game_id}: {e}")
+            return 0
+    
     def parse_and_store_odds(self, odds_data: List[Dict[str, Any]]) -> int:
         """
         Parse odds data and store in database.
@@ -265,10 +373,10 @@ class BettingOddsCollector:
     
     def _extract_game_id_from_odds(self, odds_data: Dict[str, Any]) -> Optional[str]:
         """
-        Extract NBA game ID from odds data.
+        Extract or generate NBA game ID from odds data.
         
-        The Odds API doesn't provide NBA game IDs directly, so we need to
-        match teams and dates. For now, we'll use a combination approach.
+        The Odds API doesn't provide NBA game IDs directly, so we generate
+        one based on teams and date.
         
         Args:
             odds_data: Odds dictionary from API
@@ -276,10 +384,60 @@ class BettingOddsCollector:
         Returns:
             Game ID or None
         """
-        # The Odds API provides 'id' which is their own identifier
-        # We'll need to match by teams and date
-        # For now, return None and let the caller handle game creation
-        return None
+        try:
+            home_team = odds_data.get('home_team', '')
+            away_team = odds_data.get('away_team', '')
+            commence_time = odds_data.get('commence_time', '')
+            
+            if not home_team or not away_team:
+                return None
+            
+            # Parse date and convert to US timezone for game ID
+            # Games that are early morning UTC (0-6 AM) are actually "tonight" in US time
+            if commence_time:
+                try:
+                    if 'T' in commence_time:
+                        # Parse UTC datetime
+                        if commence_time.endswith('Z'):
+                            game_datetime_utc = datetime.fromisoformat(commence_time.replace('Z', '+00:00'))
+                        else:
+                            game_datetime_utc = datetime.fromisoformat(commence_time)
+                        
+                        # Convert to US Eastern Time (most NBA games are in ET)
+                        from datetime import timezone, timedelta
+                        et_tz = timezone(timedelta(hours=-5))
+                        game_datetime_us = game_datetime_utc.astimezone(et_tz)
+                        game_date = game_datetime_us.date()
+                    else:
+                        game_date = datetime.strptime(commence_time, '%Y-%m-%d').date()
+                except (ValueError, TypeError):
+                    game_date = date.today()
+            else:
+                game_date = date.today()
+            
+            # Map team names to IDs
+            from src.backtesting.team_mapper import TeamMapper
+            team_mapper = TeamMapper(self.db_manager)
+            
+            home_team_id = team_mapper.map_team_name_to_id(home_team)
+            away_team_id = team_mapper.map_team_name_to_id(away_team)
+            
+            if not home_team_id or not away_team_id:
+                logger.warning(f"Could not map teams: {home_team} -> {home_team_id}, {away_team} -> {away_team_id}")
+                return None
+            
+            # Generate game ID: DATE + AWAY_TEAM_ID + HOME_TEAM_ID
+            # Format: YYYYMMDD + last 3 digits of each team ID
+            date_str = game_date.strftime('%Y%m%d')
+            home_suffix = home_team_id[-3:]
+            away_suffix = away_team_id[-3:]
+            game_id = f"{date_str}{away_suffix}{home_suffix}"
+            
+            return game_id
+            
+        except Exception as e:
+            logger.error(f"Error extracting game ID from odds: {e}")
+            return None
     
     def _create_game_from_odds(self, odds_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """
@@ -299,12 +457,23 @@ class BettingOddsCollector:
             if not home_team or not away_team:
                 return None
             
-            # Extract commence time
+            # Extract commence time and convert to US timezone
             commence_time = odds_data.get('commence_time', '')
             if commence_time:
                 try:
                     if 'T' in commence_time:
-                        game_date = datetime.fromisoformat(commence_time.replace('Z', '+00:00')).date()
+                        # Parse UTC datetime
+                        if commence_time.endswith('Z'):
+                            dt_utc = datetime.fromisoformat(commence_time.replace('Z', '+00:00'))
+                        else:
+                            dt_utc = datetime.fromisoformat(commence_time)
+                        
+                        # Convert to US Eastern Time (most NBA games are in ET)
+                        # Use UTC-5 for EST or UTC-4 for EDT (simplified to UTC-5)
+                        from datetime import timezone, timedelta
+                        et_tz = timezone(timedelta(hours=-5))
+                        dt_us = dt_utc.astimezone(et_tz)
+                        game_date = dt_us.date()
                     else:
                         game_date = datetime.strptime(commence_time, '%Y-%m-%d').date()
                 except (ValueError, TypeError):
@@ -312,9 +481,37 @@ class BettingOddsCollector:
             else:
                 game_date = date.today()
             
-            # Map team names to team IDs (would need a mapping)
-            # For now, return None as we need team IDs
-            return None
+            # Map team names to team IDs
+            from src.backtesting.team_mapper import TeamMapper
+            team_mapper = TeamMapper(self.db_manager)
+            
+            home_team_id = team_mapper.map_team_name_to_id(home_team)
+            away_team_id = team_mapper.map_team_name_to_id(away_team)
+            
+            if not home_team_id or not away_team_id:
+                logger.warning(f"Could not map teams for game creation: {home_team}, {away_team}")
+                return None
+            
+            # Generate game ID
+            game_id = self._extract_game_id_from_odds(odds_data)
+            if not game_id:
+                return None
+            
+            # Determine season (approximate)
+            if game_date.month >= 10:
+                season = f"{game_date.year}-{str(game_date.year + 1)[-2:]}"
+            else:
+                season = f"{game_date.year - 1}-{str(game_date.year)[-2:]}"
+            
+            return {
+                'game_id': game_id,
+                'season': season,
+                'season_type': 'Regular Season',  # Default, could be improved
+                'game_date': game_date,
+                'home_team_id': home_team_id,
+                'away_team_id': away_team_id,
+                'game_status': 'scheduled'
+            }
             
         except Exception as e:
             logger.error(f"Error creating game from odds: {e}")

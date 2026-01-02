@@ -254,6 +254,183 @@ class Prediction(Base):
         return f"<Prediction(game_id={self.game_id}, model={self.model_name}, winner={self.predicted_winner})>"
 
 
+class TeamRollingFeatures(Base):
+    """
+    Model-ready rolling features table - one row per team per game.
+    Contains pre-computed rolling averages for fast training and inference.
+    """
+    __tablename__ = 'team_rolling_features'
+    
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    game_id = Column(String, ForeignKey('games.game_id'), nullable=False)
+    team_id = Column(String, ForeignKey('teams.team_id'), nullable=False)
+    is_home = Column(Boolean, nullable=False)
+    game_date = Column(Date, nullable=False, index=True)
+    season = Column(String, nullable=False)
+    
+    # Last 5 games rolling averages
+    l5_points = Column(Float, nullable=True)
+    l5_points_allowed = Column(Float, nullable=True)
+    l5_fg_pct = Column(Float, nullable=True)
+    l5_three_pct = Column(Float, nullable=True)
+    l5_ft_pct = Column(Float, nullable=True)
+    l5_rebounds = Column(Float, nullable=True)
+    l5_assists = Column(Float, nullable=True)
+    l5_turnovers = Column(Float, nullable=True)
+    l5_steals = Column(Float, nullable=True)
+    l5_blocks = Column(Float, nullable=True)
+    l5_win_pct = Column(Float, nullable=True)
+    
+    # Last 10 games rolling averages
+    l10_points = Column(Float, nullable=True)
+    l10_points_allowed = Column(Float, nullable=True)
+    l10_fg_pct = Column(Float, nullable=True)
+    l10_three_pct = Column(Float, nullable=True)
+    l10_ft_pct = Column(Float, nullable=True)
+    l10_rebounds = Column(Float, nullable=True)
+    l10_assists = Column(Float, nullable=True)
+    l10_turnovers = Column(Float, nullable=True)
+    l10_steals = Column(Float, nullable=True)
+    l10_blocks = Column(Float, nullable=True)
+    l10_win_pct = Column(Float, nullable=True)
+    
+    # Last 20 games (season average) rolling averages
+    l20_points = Column(Float, nullable=True)
+    l20_points_allowed = Column(Float, nullable=True)
+    l20_fg_pct = Column(Float, nullable=True)
+    l20_three_pct = Column(Float, nullable=True)
+    l20_win_pct = Column(Float, nullable=True)
+    
+    # Advanced metrics (pace-adjusted)
+    offensive_rating = Column(Float, nullable=True)  # Points per 100 possessions
+    defensive_rating = Column(Float, nullable=True)  # Points allowed per 100 possessions
+    net_rating = Column(Float, nullable=True)  # Off rating - Def rating
+    pace = Column(Float, nullable=True)  # Possessions per game
+    efg_pct = Column(Float, nullable=True)  # Effective FG%
+    ts_pct = Column(Float, nullable=True)  # True shooting %
+    tov_pct = Column(Float, nullable=True)  # Turnover %
+    
+    # Additional advanced metrics
+    offensive_rebound_rate = Column(Float, nullable=True)  # Offensive rebound rate
+    defensive_rebound_rate = Column(Float, nullable=True)  # Defensive rebound rate
+    assist_rate = Column(Float, nullable=True)  # Assist rate
+    steal_rate = Column(Float, nullable=True)  # Steal rate
+    block_rate = Column(Float, nullable=True)  # Block rate
+    
+    # Average stats (last 10 games)
+    avg_point_differential = Column(Float, nullable=True)  # Average point differential
+    avg_points_for = Column(Float, nullable=True)  # Average points scored
+    avg_points_against = Column(Float, nullable=True)  # Average points allowed
+    
+    # Streaks
+    win_streak = Column(Integer, nullable=True)  # Current win streak
+    loss_streak = Column(Integer, nullable=True)  # Current loss streak
+    
+    # Injury features
+    players_out = Column(Integer, nullable=True)  # Number of players out
+    players_questionable = Column(Integer, nullable=True)  # Number of players questionable
+    injury_severity_score = Column(Float, nullable=True)  # Injury severity (0-1)
+    
+    # Contextual features
+    days_rest = Column(Integer, nullable=True)
+    is_back_to_back = Column(Boolean, nullable=True)
+    games_in_last_7_days = Column(Integer, nullable=True)
+    home_win_pct = Column(Float, nullable=True)
+    away_win_pct = Column(Float, nullable=True)
+    
+    # Target variable (stored separately for clarity)
+    won_game = Column(Boolean, nullable=True)  # Only set after game completes
+    point_differential = Column(Integer, nullable=True)
+    
+    created_at = Column(DateTime, default=func.now(), nullable=False)
+    updated_at = Column(DateTime, default=func.now(), onupdate=func.now(), nullable=False)
+    
+    # Relationships
+    game = relationship("Game")
+    team = relationship("Team")
+    
+    # Indexes
+    __table_args__ = (
+        UniqueConstraint('game_id', 'team_id', name='uq_rolling_game_team'),
+        Index('idx_rolling_team_date', 'team_id', 'game_date'),
+        Index('idx_rolling_season', 'season'),
+        Index('idx_rolling_game_date', 'game_date'),
+    )
+    
+    def __repr__(self):
+        return f"<TeamRollingFeatures(game_id={self.game_id}, team_id={self.team_id})>"
+
+
+class GameMatchupFeatures(Base):
+    """
+    Game-level matchup features table - one row per game.
+    Contains head-to-head, style matchup, and contextual features.
+    """
+    __tablename__ = 'game_matchup_features'
+    
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    game_id = Column(String, ForeignKey('games.game_id'), nullable=False, unique=True)
+    game_date = Column(Date, nullable=False, index=True)
+    season = Column(String, nullable=False)
+    home_team_id = Column(String, ForeignKey('teams.team_id'), nullable=False)
+    away_team_id = Column(String, ForeignKey('teams.team_id'), nullable=False)
+    
+    # Head-to-head features
+    h2h_home_wins = Column(Integer, nullable=True)  # Home team wins in last 5 H2H
+    h2h_away_wins = Column(Integer, nullable=True)  # Away team wins in last 5 H2H
+    h2h_total_games = Column(Integer, nullable=True)  # Total H2H games
+    h2h_avg_point_differential = Column(Float, nullable=True)  # H2H point differential
+    h2h_home_avg_score = Column(Float, nullable=True)  # Home team avg score in H2H
+    h2h_away_avg_score = Column(Float, nullable=True)  # Away team avg score in H2H
+    
+    # Style matchup features
+    pace_differential = Column(Float, nullable=True)  # Pace difference
+    ts_differential = Column(Float, nullable=True)  # True shooting % difference
+    efg_differential = Column(Float, nullable=True)  # Effective FG% difference
+    
+    # Recent form comparison
+    home_win_pct_recent = Column(Float, nullable=True)  # Home team recent win %
+    away_win_pct_recent = Column(Float, nullable=True)  # Away team recent win %
+    win_pct_differential = Column(Float, nullable=True)  # Win % difference
+    
+    # Contextual features
+    same_conference = Column(Boolean, nullable=True)  # Same conference
+    same_division = Column(Boolean, nullable=True)  # Same division
+    is_playoffs = Column(Boolean, nullable=True)  # Is playoff game
+    is_home_advantage = Column(Integer, nullable=True, default=1)  # Home advantage (always 1)
+    
+    # Rest days
+    home_rest_days = Column(Integer, nullable=True)
+    away_rest_days = Column(Integer, nullable=True)
+    rest_days_differential = Column(Integer, nullable=True)
+    
+    # Back-to-back
+    home_is_b2b = Column(Boolean, nullable=True)
+    away_is_b2b = Column(Boolean, nullable=True)
+    
+    # Days until next game
+    home_days_until_next = Column(Integer, nullable=True)
+    away_days_until_next = Column(Integer, nullable=True)
+    
+    created_at = Column(DateTime, default=func.now(), nullable=False)
+    updated_at = Column(DateTime, default=func.now(), onupdate=func.now(), nullable=False)
+    
+    # Relationships
+    game = relationship("Game")
+    home_team = relationship("Team", foreign_keys=[home_team_id])
+    away_team = relationship("Team", foreign_keys=[away_team_id])
+    
+    # Indexes
+    __table_args__ = (
+        Index('idx_matchup_game_date', 'game_date'),
+        Index('idx_matchup_season', 'season'),
+        Index('idx_matchup_teams', 'home_team_id', 'away_team_id'),
+    )
+    
+    def __repr__(self):
+        return f"<GameMatchupFeatures(game_id={self.game_id})>"
+
+
 class Bet(Base):
     """Betting decisions and outcomes table."""
     __tablename__ = 'bets'
