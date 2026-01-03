@@ -437,12 +437,14 @@ class Bet(Base):
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     game_id = Column(String, ForeignKey('games.game_id'), nullable=False, comment="Game identifier")
+    strategy_name = Column(String, nullable=False, default='kelly', comment="Strategy used (kelly, ev, confidence)")
     bet_type = Column(String, nullable=False, comment="spread, moneyline, over_under")
     bet_team = Column(String, ForeignKey('teams.team_id'), nullable=True, comment="Team bet on (for spread/moneyline)")
     bet_value = Column(Float, nullable=True, comment="Spread value or over/under value")
     bet_amount = Column(Float, nullable=False, comment="Amount wagered")
     odds = Column(Float, nullable=False, comment="Odds (decimal format)")
     expected_value = Column(Float, nullable=False, comment="Expected value of the bet")
+    confidence = Column(Float, nullable=True, comment="Model confidence for bet")
     outcome = Column(String, nullable=True, comment="win, loss, push")
     payout = Column(Float, nullable=True, comment="Payout amount (if won)")
     profit = Column(Float, nullable=True, comment="Profit/loss from bet")
@@ -458,8 +460,31 @@ class Bet(Base):
         Index('idx_game_id_bet', 'game_id'),
         Index('idx_placed_at', 'placed_at'),
         Index('idx_outcome', 'outcome'),
+        Index('idx_strategy_name', 'strategy_name'),
+        Index('idx_strategy_date', 'strategy_name', 'placed_at'),
     )
 
     def __repr__(self):
-        return f"<Bet(game_id={self.game_id}, type={self.bet_type}, amount={self.bet_amount}, outcome={self.outcome})>"
+        return f"<Bet(game_id={self.game_id}, strategy={self.strategy_name}, amount={self.bet_amount}, outcome={self.outcome})>"
+
+
+class BankrollSnapshot(Base):
+    """Track bankroll per strategy over time."""
+    __tablename__ = 'bankroll_snapshots'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    strategy_name = Column(String, nullable=False, comment="Strategy name")
+    snapshot_date = Column(Date, nullable=False, comment="Date of snapshot")
+    bankroll = Column(Float, nullable=False, comment="Bankroll at end of day")
+    daily_pnl = Column(Float, nullable=False, default=0.0, comment="Profit/loss for the day")
+    total_bets = Column(Integer, nullable=False, default=0, comment="Total bets placed this day")
+    wins = Column(Integer, nullable=False, default=0, comment="Bets won")
+    losses = Column(Integer, nullable=False, default=0, comment="Bets lost")
+    created_at = Column(DateTime, default=func.now(), nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint('strategy_name', 'snapshot_date', name='uq_strategy_date'),
+        Index('idx_snapshot_strategy', 'strategy_name'),
+        Index('idx_snapshot_date', 'snapshot_date'),
+    )
 

@@ -353,8 +353,151 @@ def evaluate_predictions(quiet: bool = False) -> dict:
     return stats
 
 
-def run_morning_workflow(quiet: bool = False):
-    """Run morning workflow: fetch games and make predictions."""
+def place_bets(quiet: bool = False, strategies: list = None) -> dict:
+    """Step 2.5: Place bets using betting strategies."""
+    from src.backtesting.betting_manager import BettingManager, STRATEGIES
+    
+    today = date.today()
+    stats = {'strategies': {}, 'total_bets': 0, 'total_wagered': 0.0}
+    
+    if strategies is None:
+        strategies = list(STRATEGIES.keys())
+    
+    if not quiet:
+        logger.info(f"[STEP 2.5] Placing bets for {today} using {', '.join(strategies)}")
+    
+    try:
+        betting_manager = BettingManager()
+        
+        result = betting_manager.place_bets_for_date(
+            target_date=today,
+            strategy_names=strategies,
+            model_name='nba_v2_classifier'
+        )
+        
+        if result['status'] == 'complete':
+            for strategy_name, data in result['strategies'].items():
+                stats['strategies'][strategy_name] = {
+                    'bets': data['bets_placed'],
+                    'wagered': data['total_wagered'],
+                    'bankroll': data['bankroll_after']
+                }
+                stats['total_bets'] += data['bets_placed']
+                stats['total_wagered'] += data['total_wagered']
+                
+                if not quiet and data['bets_placed'] > 0:
+                    logger.info(f"\n  {strategy_name.upper()}:")
+                    logger.info(f"    Bets placed: {data['bets_placed']}")
+                    logger.info(f"    Total wagered: ${data['total_wagered']:.2f}")
+                    logger.info(f"    Bankroll: ${data['bankroll_after']:,.2f}")
+                    
+                    # Show individual bets
+                    for bet in data['bets']:
+                        logger.info(f"      - {bet['team']}: ${bet['amount']:.2f} @ {bet['odds']:.3f} (conf: {bet['confidence']:.1%})")
+        
+        if not quiet:
+            logger.info(f"\n  TOTAL: {stats['total_bets']} bets, ${stats['total_wagered']:.2f} wagered")
+            
+    except Exception as e:
+        logger.error(f"  Error placing bets: {e}")
+        import traceback
+        logger.debug(traceback.format_exc())
+    
+    return stats
+
+
+def resolve_bets(quiet: bool = False) -> dict:
+    """Step 4.5: Resolve bets for finished games."""
+    from src.backtesting.betting_manager import BettingManager
+    
+    yesterday = date.today() - timedelta(days=1)
+    stats = {'strategies': {}, 'total_resolved': 0, 'total_profit': 0.0}
+    
+    if not quiet:
+        logger.info(f"[STEP 4.5] Resolving bets for {yesterday}")
+    
+    try:
+        betting_manager = BettingManager()
+        
+        result = betting_manager.resolve_bets_for_date(yesterday)
+        
+        if result['status'] == 'complete':
+            for strategy_name, data in result['strategies'].items():
+                stats['strategies'][strategy_name] = {
+                    'resolved': data['resolved'],
+                    'wins': data['wins'],
+                    'losses': data['losses'],
+                    'profit': data['total_profit']
+                }
+                stats['total_resolved'] += data['resolved']
+                stats['total_profit'] += data['total_profit']
+                
+                if not quiet and data['resolved'] > 0:
+                    pnl_str = f"+${data['total_profit']:.2f}" if data['total_profit'] >= 0 else f"-${abs(data['total_profit']):.2f}"
+                    logger.info(f"\n  {strategy_name.upper()}:")
+                    logger.info(f"    Resolved: {data['resolved']} ({data['wins']}W / {data['losses']}L)")
+                    logger.info(f"    Win Rate: {data['win_rate']:.1%}")
+                    logger.info(f"    Profit: {pnl_str}")
+                    
+                    # Show individual bet results
+                    for bet in data['bets']:
+                        outcome_str = "[WIN]" if bet['outcome'] == 'win' else "[LOSS]"
+                        profit_str = f"+${bet['profit']:.2f}" if bet['profit'] >= 0 else f"-${abs(bet['profit']):.2f}"
+                        logger.info(f"      {outcome_str} {bet['bet_team']}: {profit_str}")
+        
+        total_pnl_str = f"+${stats['total_profit']:.2f}" if stats['total_profit'] >= 0 else f"-${abs(stats['total_profit']):.2f}"
+        if not quiet:
+            logger.info(f"\n  TOTAL: {stats['total_resolved']} bets resolved, {total_pnl_str}")
+        
+        # Show daily summary
+        betting_manager.print_daily_summary(yesterday, quiet)
+            
+    except Exception as e:
+        logger.error(f"  Error resolving bets: {e}")
+        import traceback
+        logger.debug(traceback.format_exc())
+    
+    return stats
+
+
+def show_pnl(period: str = 'daily', quiet: bool = False) -> dict:
+    """Show PNL summary for a period."""
+    from src.backtesting.betting_manager import BettingManager
+    
+    stats = {}
+    
+    if quiet:
+        return stats
+    
+    try:
+        betting_manager = BettingManager()
+        
+        today = date.today()
+        
+        if period == 'daily':
+            yesterday = today - timedelta(days=1)
+            betting_manager.print_daily_summary(yesterday)
+        elif period == 'weekly':
+            # Last 7 days
+            start_date = today - timedelta(days=7)
+            betting_manager.print_period_summary(start_date, today)
+        elif period == 'monthly':
+            # Last 30 days
+            start_date = today - timedelta(days=30)
+            betting_manager.print_period_summary(start_date, today)
+        elif period == 'all':
+            # All time (from beginning of current season)
+            start_date = date(2025, 10, 1)  # Season start
+            betting_manager.print_period_summary(start_date, today)
+        
+    except Exception as e:
+        logger.error(f"Error getting PNL: {e}")
+    
+    return stats
+
+
+def run_morning_workflow(quiet: bool = False, enable_betting: bool = True, strategies: list = None):
+    """Run morning workflow: fetch games, make predictions, and optionally place bets."""
     if not quiet:
         logger.info("=" * 70)
         logger.info(f"MORNING WORKFLOW - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
@@ -366,18 +509,26 @@ def run_morning_workflow(quiet: bool = False):
     # Step 2: Make predictions
     pred_stats = make_predictions(quiet)
     
+    # Step 2.5: Place bets (if enabled)
+    bet_stats = {}
+    if enable_betting:
+        bet_stats = place_bets(quiet, strategies)
+    
     if not quiet:
         logger.info("=" * 70)
         logger.info("MORNING WORKFLOW COMPLETE")
         logger.info(f"  Games fetched: {fetch_stats['fetched']}")
         logger.info(f"  Predictions saved: {pred_stats['saved']}")
+        if enable_betting:
+            logger.info(f"  Bets placed: {bet_stats.get('total_bets', 0)}")
+            logger.info(f"  Total wagered: ${bet_stats.get('total_wagered', 0):.2f}")
         logger.info("=" * 70)
     
-    return {'fetch': fetch_stats, 'predictions': pred_stats}
+    return {'fetch': fetch_stats, 'predictions': pred_stats, 'bets': bet_stats}
 
 
-def run_evening_workflow(quiet: bool = False):
-    """Run evening workflow: update scores and evaluate."""
+def run_evening_workflow(quiet: bool = False, enable_betting: bool = True):
+    """Run evening workflow: update scores, evaluate, and resolve bets."""
     if not quiet:
         logger.info("=" * 70)
         logger.info(f"EVENING WORKFLOW - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
@@ -389,18 +540,28 @@ def run_evening_workflow(quiet: bool = False):
     # Step 4: Evaluate predictions
     eval_stats = evaluate_predictions(quiet)
     
+    # Step 4.5: Resolve bets (if enabled)
+    bet_stats = {}
+    if enable_betting:
+        bet_stats = resolve_bets(quiet)
+    
     if not quiet:
         logger.info("=" * 70)
         logger.info("EVENING WORKFLOW COMPLETE")
         logger.info(f"  Games updated: {score_stats['updated']}")
         logger.info(f"  Accuracy: {eval_stats['correct']}/{eval_stats['games']} ({eval_stats['accuracy']:.1%})")
+        if enable_betting and bet_stats:
+            pnl = bet_stats.get('total_profit', 0)
+            pnl_str = f"+${pnl:.2f}" if pnl >= 0 else f"-${abs(pnl):.2f}"
+            logger.info(f"  Bets resolved: {bet_stats.get('total_resolved', 0)}")
+            logger.info(f"  Daily PNL: {pnl_str}")
         logger.info("=" * 70)
     
-    return {'scores': score_stats, 'evaluation': eval_stats}
+    return {'scores': score_stats, 'evaluation': eval_stats, 'bets': bet_stats}
 
 
-def run_full_workflow(quiet: bool = False):
-    """Run the complete workflow (all steps)."""
+def run_full_workflow(quiet: bool = False, enable_betting: bool = True, strategies: list = None):
+    """Run the complete workflow (all steps including betting)."""
     if not quiet:
         logger.info("=" * 70)
         logger.info(f"FULL DAILY WORKFLOW - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
@@ -411,16 +572,31 @@ def run_full_workflow(quiet: bool = False):
     # All steps
     results['fetch'] = fetch_todays_games(quiet)
     results['predictions'] = make_predictions(quiet)
+    
+    # Place bets for today
+    if enable_betting:
+        results['bets_placed'] = place_bets(quiet, strategies)
+    
     results['scores'] = update_scores(quiet)
     results['evaluation'] = evaluate_predictions(quiet)
+    
+    # Resolve bets from yesterday
+    if enable_betting:
+        results['bets_resolved'] = resolve_bets(quiet)
     
     if not quiet:
         logger.info("=" * 70)
         logger.info("FULL WORKFLOW COMPLETE")
         logger.info(f"  Games fetched: {results['fetch']['fetched']}")
         logger.info(f"  Predictions saved: {results['predictions']['saved']}")
+        if enable_betting:
+            logger.info(f"  Bets placed: {results.get('bets_placed', {}).get('total_bets', 0)}")
         logger.info(f"  Scores updated: {results['scores']['updated']}")
         logger.info(f"  Yesterday's accuracy: {results['evaluation']['accuracy']:.1%}")
+        if enable_betting:
+            pnl = results.get('bets_resolved', {}).get('total_profit', 0)
+            pnl_str = f"+${pnl:.2f}" if pnl >= 0 else f"-${abs(pnl):.2f}"
+            logger.info(f"  Yesterday's PNL: {pnl_str}")
         logger.info("=" * 70)
     
     return results
@@ -429,26 +605,43 @@ def run_full_workflow(quiet: bool = False):
 def main():
     """Main entry point."""
     parser = ArgumentParser(
-        description='Automated NBA Prediction Workflow',
+        description='Automated NBA Prediction Workflow with Betting',
         epilog="""
 Examples:
-  python daily_workflow.py                  # Run full workflow
-  python daily_workflow.py --morning        # Morning: fetch + predict
-  python daily_workflow.py --evening        # Evening: update scores + evaluate
-  python daily_workflow.py --quiet          # Minimal output for automation
+  python daily_workflow.py                  # Run full workflow with betting
+  python daily_workflow.py --morning        # Morning: fetch + predict + place bets
+  python daily_workflow.py --evening        # Evening: update scores + evaluate + resolve bets
+  python daily_workflow.py --no-betting     # Run without betting
+  python daily_workflow.py --strategy kelly # Use only Kelly strategy
+  python daily_workflow.py --pnl weekly     # Show weekly PNL summary
         """
     )
     parser.add_argument('--morning', action='store_true',
-                       help='Run morning workflow only (fetch + predict)')
+                       help='Run morning workflow only (fetch + predict + bet)')
     parser.add_argument('--evening', action='store_true',
-                       help='Run evening workflow only (update + evaluate)')
+                       help='Run evening workflow only (update + evaluate + resolve)')
     parser.add_argument('--quiet', action='store_true',
                        help='Suppress detailed output (for automation)')
-    parser.add_argument('--step', type=int, choices=[1, 2, 3, 4],
-                       help='Run specific step only (1=fetch, 2=predict, 3=update, 4=evaluate)')
+    parser.add_argument('--step', type=int, choices=[1, 2, 3, 4, 5, 6],
+                       help='Run specific step (1=fetch, 2=predict, 3=update, 4=evaluate, 5=place bets, 6=resolve bets)')
+    parser.add_argument('--no-betting', action='store_true',
+                       help='Disable betting (predictions only)')
+    parser.add_argument('--strategy', type=str, choices=['kelly', 'ev', 'confidence', 'all'],
+                       default='all', help='Betting strategy to use (default: all)')
+    parser.add_argument('--pnl', type=str, choices=['daily', 'weekly', 'monthly', 'all'],
+                       help='Show PNL summary for period')
     args = parser.parse_args()
     
+    # Parse strategies
+    strategies = None if args.strategy == 'all' else [args.strategy]
+    enable_betting = not args.no_betting
+    
     try:
+        # Handle PNL summary request
+        if args.pnl:
+            show_pnl(args.pnl, args.quiet)
+            return 0
+        
         if args.step:
             # Run specific step
             if args.step == 1:
@@ -459,17 +652,23 @@ Examples:
                 update_scores(args.quiet)
             elif args.step == 4:
                 evaluate_predictions(args.quiet)
+            elif args.step == 5:
+                place_bets(args.quiet, strategies)
+            elif args.step == 6:
+                resolve_bets(args.quiet)
         elif args.morning:
-            run_morning_workflow(args.quiet)
+            run_morning_workflow(args.quiet, enable_betting, strategies)
         elif args.evening:
-            run_evening_workflow(args.quiet)
+            run_evening_workflow(args.quiet, enable_betting)
         else:
-            run_full_workflow(args.quiet)
+            run_full_workflow(args.quiet, enable_betting, strategies)
         
         return 0
         
     except Exception as e:
         logger.error(f"Workflow failed: {e}")
+        import traceback
+        logger.debug(traceback.format_exc())
         return 1
 
 
