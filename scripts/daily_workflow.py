@@ -203,7 +203,22 @@ def update_scores(quiet: bool = False) -> dict:
                 stats['checked'] += 1
                 
                 try:
-                    game_details = nba_collector.get_game_details(game.game_id)
+                    # Check if game_id is betting API format (starts with date) or NBA format (starts with 00)
+                    if game.game_id.startswith('2026') or len(game.game_id) > 10:
+                        # Betting API format - need to find NBA game ID
+                        nba_game_id = nba_collector.find_nba_game_id(
+                            game.home_team_id,
+                            game.away_team_id,
+                            game.game_date
+                        )
+                        if not nba_game_id:
+                            if not quiet:
+                                logger.warning(f"Could not find NBA game ID for {game.game_id}")
+                            continue
+                        game_details = nba_collector.get_game_details(nba_game_id)
+                    else:
+                        # NBA format - use directly
+                        game_details = nba_collector.get_game_details(game.game_id)
                     
                     if game_details and game_details.get('home_score') is not None:
                         home_score = game_details['home_score']

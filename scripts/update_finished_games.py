@@ -85,8 +85,23 @@ def update_game_scores(target_date: date, db: DatabaseManager, quiet: bool = Fal
         stats['checked'] += 1
         
         try:
-            # Get game details from NBA API
-            game_details = nba_collector.get_game_details(game.game_id)
+            # Check if game_id is betting API format (starts with date) or NBA format (starts with 00)
+            if game.game_id.startswith('2026') or len(game.game_id) > 10:
+                # Betting API format - need to find NBA game ID
+                nba_game_id = nba_collector.find_nba_game_id(
+                    game.home_team_id,
+                    game.away_team_id,
+                    game.game_date
+                )
+                if not nba_game_id:
+                    if not quiet:
+                        logger.debug(f"Could not find NBA game ID for {game.game_id}")
+                    stats['still_scheduled'] += 1
+                    continue
+                game_details = nba_collector.get_game_details(nba_game_id)
+            else:
+                # NBA format - use directly
+                game_details = nba_collector.get_game_details(game.game_id)
             
             if not game_details:
                 # Try alternative: check if game has scores in database already

@@ -238,6 +238,80 @@ class NBAPICollector:
             logger.error(f"Error getting games for date {game_date}: {e}")
             return []
     
+    def find_nba_game_id(self, home_team_id: str, away_team_id: str, game_date: date) -> Optional[str]:
+        """
+        Find NBA game ID by querying games for a team on a specific date.
+        
+        Args:
+            home_team_id: Home team ID
+            away_team_id: Away team ID
+            game_date: Date of the game
+            
+        Returns:
+            NBA game ID or None
+        """
+        try:
+            # Get season from date (NBA season starts in October)
+            if game_date.month >= 10:
+                season = f"{game_date.year}-{str(game_date.year + 1)[-2:]}"
+            else:
+                season = f"{game_date.year - 1}-{str(game_date.year)[-2:]}"
+            
+            # Get team abbreviations for matching
+            from src.database.db_manager import DatabaseManager
+            db = DatabaseManager()
+            home_team = db.get_team(home_team_id)
+            away_team = db.get_team(away_team_id)
+            
+            if not home_team or not away_team:
+                return None
+            
+            # Map database abbreviations to NBA API abbreviations
+            # NBA API uses different abbreviations than our database
+            DB_TO_NBA_ABBREV = {
+                'BRK': 'BKN',  # Brooklyn Nets
+                'CHO': 'CHA',  # Charlotte Hornets
+                'PHO': 'PHX',  # Phoenix Suns
+            }
+            
+            home_abbrev_db = home_team.team_abbreviation
+            away_abbrev_db = away_team.team_abbreviation
+            
+            # Convert to NBA API abbreviations
+            home_abbrev = DB_TO_NBA_ABBREV.get(home_abbrev_db, home_abbrev_db)
+            away_abbrev = DB_TO_NBA_ABBREV.get(away_abbrev_db, away_abbrev_db)
+            
+            # Try home team first
+            games = self.get_games_for_team_season(home_team_id, season)
+            
+            for game in games:
+                if game.get('game_date') == game_date:
+                    matchup = game.get('matchup', '')
+                    # Matchup format: "LAL @ GSW" (away @ home) or "LAL vs. GSW"
+                    if '@' in matchup:
+                        parts = matchup.split('@')
+                        if len(parts) == 2:
+                            away_match = parts[0].strip()
+                            home_match = parts[1].strip()
+                            if away_match == away_abbrev and home_match == home_abbrev:
+                                nba_game_id = game.get('game_id')
+                                return nba_game_id
+                    elif 'vs.' in matchup or 'vs' in matchup:
+                        # Home team listed first in "vs" format
+                        separator = 'vs.' if 'vs.' in matchup else 'vs'
+                        parts = matchup.split(separator)
+                        if len(parts) == 2:
+                            home_match = parts[0].strip()
+                            away_match = parts[1].strip()
+                            if home_match == home_abbrev and away_match == away_abbrev:
+                                nba_game_id = game.get('game_id')
+                                return nba_game_id
+            
+            return None
+        except Exception as e:
+            logger.debug(f"Error finding NBA game ID: {e}")
+            return None
+    
     def get_game_details(self, game_id: str) -> Optional[Dict[str, Any]]:
         """
         Get detailed game information including scores.
