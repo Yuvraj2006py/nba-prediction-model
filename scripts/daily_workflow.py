@@ -261,7 +261,7 @@ def evaluate_predictions(quiet: bool = False) -> dict:
     import numpy as np
     
     yesterday = date.today() - timedelta(days=1)
-    stats = {'games': 0, 'correct': 0, 'accuracy': 0.0}
+    stats = {'games': 0, 'correct': 0, 'accuracy': 0.0, 'correct_games': [], 'incorrect_games': []}
     
     if not quiet:
         logger.info(f"[STEP 4] Evaluating predictions for {yesterday}")
@@ -286,12 +286,45 @@ def evaluate_predictions(quiet: bool = False) -> dict:
                     model_name='nba_v2_classifier'
                 ).first()
                 
-                if prediction:
-                    actual_winner = game.winner
-                    predicted_winner = prediction.predicted_winner
-                    
-                    if actual_winner == predicted_winner:
-                        stats['correct'] += 1
+                if not prediction:
+                    continue
+                
+                # Get team names
+                home_team = db.get_team(game.home_team_id)
+                away_team = db.get_team(game.away_team_id)
+                actual_winner_team = db.get_team(game.winner) if game.winner else None
+                predicted_winner_team = db.get_team(prediction.predicted_winner) if prediction.predicted_winner else None
+                
+                home_name = home_team.team_name if home_team else game.home_team_id
+                away_name = away_team.team_name if away_team else game.away_team_id
+                actual_winner_name = actual_winner_team.team_name if actual_winner_team else (game.winner or "Unknown")
+                predicted_winner_name = predicted_winner_team.team_name if predicted_winner_team else (prediction.predicted_winner or "Unknown")
+                
+                actual_winner = game.winner
+                predicted_winner = prediction.predicted_winner
+                
+                is_correct = actual_winner == predicted_winner
+                
+                # Format score as "Away @ Home: AwayScore-HomeScore"
+                score_str = f"{away_name} {game.away_score} @ {home_name} {game.home_score}"
+                
+                game_result = {
+                    'game_id': game.game_id,
+                    'matchup': f"{away_name} @ {home_name}",
+                    'score': score_str,
+                    'actual_winner': actual_winner_name,
+                    'predicted_winner': predicted_winner_name,
+                    'confidence': prediction.confidence,
+                    'home_prob': prediction.win_probability_home,
+                    'away_prob': prediction.win_probability_away,
+                    'predicted_margin': prediction.predicted_point_differential
+                }
+                
+                if is_correct:
+                    stats['correct'] += 1
+                    stats['correct_games'].append(game_result)
+                else:
+                    stats['incorrect_games'].append(game_result)
             
             if stats['games'] > 0:
                 stats['accuracy'] = stats['correct'] / stats['games']
@@ -299,6 +332,20 @@ def evaluate_predictions(quiet: bool = False) -> dict:
         if not quiet:
             logger.info(f"  Evaluated {stats['games']} games")
             logger.info(f"  Correct: {stats['correct']}/{stats['games']} ({stats['accuracy']:.1%})")
+            
+            # Show correct predictions
+            if stats['correct_games']:
+                logger.info(f"\n  [CORRECT] PREDICTIONS ({len(stats['correct_games'])}):")
+                for game in stats['correct_games']:
+                    logger.info(f"    - {game['score']}")
+                    logger.info(f"      Winner: {game['actual_winner']} | Confidence: {game['confidence']:.1%}")
+            
+            # Show incorrect predictions
+            if stats['incorrect_games']:
+                logger.info(f"\n  [INCORRECT] PREDICTIONS ({len(stats['incorrect_games'])}):")
+                for game in stats['incorrect_games']:
+                    logger.info(f"    - {game['score']}")
+                    logger.info(f"      Actual: {game['actual_winner']} | Predicted: {game['predicted_winner']} | Confidence: {game['confidence']:.1%}")
             
     except Exception as e:
         logger.error(f"  Error evaluating predictions: {e}")
