@@ -9,11 +9,15 @@ CRITICAL: Features generated here MUST match those from DataLoader during traini
 
 import logging
 import json
+import warnings
 from pathlib import Path
 from typing import Dict, Any, List, Optional, Tuple
 from datetime import date, timedelta
 import pandas as pd
 import numpy as np
+
+# Suppress pandas PerformanceWarnings
+warnings.filterwarnings('ignore', category=pd.errors.PerformanceWarning)
 
 from src.database.db_manager import DatabaseManager
 from src.database.models import Game, TeamRollingFeatures, GameMatchupFeatures, Prediction

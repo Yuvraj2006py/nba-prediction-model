@@ -11,6 +11,7 @@ Can be run manually or scheduled via Windows Task Scheduler / cron.
 Uses dynamic dates - no hardcoding required.
 """
 
+
 import sys
 from pathlib import Path
 project_root = Path(__file__).parent.parent
@@ -20,8 +21,10 @@ import os
 os.environ['DATABASE_TYPE'] = 'sqlite'
 
 import warnings
+import pandas as pd
 warnings.filterwarnings('ignore', category=FutureWarning)
 warnings.filterwarnings('ignore', category=RuntimeWarning)
+warnings.filterwarnings('ignore', category=pd.errors.PerformanceWarning)
 
 import logging
 from datetime import date, datetime, timedelta
@@ -40,6 +43,26 @@ logging.basicConfig(
     ]
 )
 logger = logging.getLogger(__name__)
+
+
+def decimal_to_american_odds(decimal_odds: float) -> str:
+    """
+    Convert decimal odds to American format.
+    
+    Args:
+        decimal_odds: Decimal odds (e.g., 2.5, 1.5)
+        
+    Returns:
+        American odds string (e.g., "+150", "-200")
+    """
+    if decimal_odds >= 2.0:
+        # Positive American odds
+        american = int((decimal_odds - 1) * 100)
+        return f"+{american}"
+    else:
+        # Negative American odds
+        american = int(-100 / (decimal_odds - 1))
+        return str(american)
 
 
 def fetch_todays_games(quiet: bool = False) -> dict:
@@ -118,11 +141,11 @@ def make_predictions(quiet: bool = False) -> dict:
     """Step 2: Make predictions for today's games and save to database."""
     from src.database.db_manager import DatabaseManager
     from src.prediction.prediction_service import PredictionService
-    from src.database.models import Game
+    from src.database.models import Game, Team
     
     today = date.today()
     today_str = today.strftime('%Y%m%d')
-    stats = {'games': 0, 'predicted': 0, 'saved': 0}
+    stats = {'games': 0, 'predicted': 0, 'saved': 0, 'predictions': []}
     
     if not quiet:
         logger.info(f"[STEP 2] Making predictions for {today}")
@@ -159,6 +182,21 @@ def make_predictions(quiet: bool = False) -> dict:
                     try:
                         prediction_service.save_prediction(result, model_name='nba_v2_classifier')
                         stats['saved'] += 1
+                        
+                        # Collect prediction details for summary
+                        with db.get_session() as session:
+                            home_team = session.query(Team).filter_by(team_id=game.home_team_id).first()
+                            away_team = session.query(Team).filter_by(team_id=game.away_team_id).first()
+                            predicted_team = session.query(Team).filter_by(team_id=result.get('predicted_winner')).first()
+                            
+                            stats['predictions'].append({
+                                'matchup': f"{away_team.team_name if away_team else game.away_team_id} @ {home_team.team_name if home_team else game.home_team_id}",
+                                'predicted_winner': predicted_team.team_name if predicted_team else result.get('predicted_winner', 'Unknown'),
+                                'confidence': result.get('confidence', 0),
+                                'home_prob': result.get('win_probability_home', 0),
+                                'away_prob': result.get('win_probability_away', 0),
+                                'margin': result.get('predicted_point_differential', 0)
+                            })
                     except Exception as e:
                         logger.debug(f"Could not save prediction for {game.game_id}: {e}")
                         
@@ -426,7 +464,7 @@ def place_bets(quiet: bool = False, strategies: list = None) -> dict:
     from src.backtesting.betting_manager import BettingManager, STRATEGIES
     
     today = date.today()
-    stats = {'strategies': {}, 'total_bets': 0, 'total_wagered': 0.0}
+    stats = {'strategies': {}, 'total_bets': 0, 'total_wagered': 0.0, 'bet_details': []}
     
     if strategies is None:
         strategies = list(STRATEGIES.keys())
@@ -445,23 +483,56 @@ def place_bets(quiet: bool = False, strategies: list = None) -> dict:
         
         if result['status'] == 'complete':
             for strategy_name, data in result['strategies'].items():
-                stats['strategies'][strategy_name] = {
-                    'bets': data['bets_placed'],
-                    'wagered': data['total_wagered'],
-                    'bankroll': data['bankroll_after']
-                }
-                stats['total_bets'] += data['bets_placed']
-                stats['total_wagered'] += data['total_wagered']
+                # Use all_bets (new + existing) for display
+                all_bets = data.get('all_bets', data.get('bets', []))
+                total_all_wagered = data.get('total_all_wagered', data.get('total_wagered', 0))
                 
-                if not quiet and data['bets_placed'] > 0:
+                stats['strategies'][strategy_name] = {
+                    'bets': len(all_bets),  # Total bets (new + existing)
+                    'bets_new': data.get('bets_placed', 0),  # New bets only
+                    'bets_existing': data.get('bets_existing', 0),  # Existing bets
+                    'wagered': total_all_wagered,  # Total wagered (all bets)
+                    'wagered_new': data.get('total_wagered', 0),  # New bets wagered
+                    'bankroll_before': data['bankroll_before'],
+                    'bankroll_after': data['bankroll_after']
+                }
+                stats['total_bets'] += len(all_bets)
+                stats['total_wagered'] += total_all_wagered
+                
+                # Collect bet details for summary (all bets)
+                for bet in all_bets:
+                    stats['bet_details'].append({
+                        'strategy': strategy_name,
+                        'team': bet['team'],
+                        'amount': bet['amount'],
+                        'odds': bet['odds'],
+                        'american_odds': bet.get('american_odds'),  # Include original American odds
+                        'sportsbook': bet.get('sportsbook'),  # Include sportsbook used
+                        'confidence': bet.get('confidence', 0),
+                        'ev': bet.get('ev', 0)
+                    })
+                
+                if not quiet and len(all_bets) > 0:
                     logger.info(f"\n  {strategy_name.upper()}:")
-                    logger.info(f"    Bets placed: {data['bets_placed']}")
-                    logger.info(f"    Total wagered: ${data['total_wagered']:.2f}")
+                    if data.get('bets_placed', 0) > 0:
+                        logger.info(f"    New bets placed: {data.get('bets_placed', 0)}")
+                    if data.get('bets_existing', 0) > 0:
+                        logger.info(f"    Existing bets: {data.get('bets_existing', 0)}")
+                    logger.info(f"    Total bets: {len(all_bets)}")
+                    logger.info(f"    Total wagered: ${total_all_wagered:.2f}")
                     logger.info(f"    Bankroll: ${data['bankroll_after']:,.2f}")
                     
-                    # Show individual bets
-                    for bet in data['bets']:
-                        logger.info(f"      - {bet['team']}: ${bet['amount']:.2f} @ {bet['odds']:.3f} (conf: {bet['confidence']:.1%})")
+                    # Show individual bets (all bets)
+                    for bet in all_bets:
+                        # Use original American odds if available, otherwise convert from decimal
+                        if 'american_odds' in bet and bet['american_odds'] is not None:
+                            american_odds_str = f"+{bet['american_odds']}" if bet['american_odds'] > 0 else str(bet['american_odds'])
+                        else:
+                            american_odds_str = decimal_to_american_odds(bet['odds'])
+                        
+                        # Show sportsbook if available
+                        sportsbook_str = f" [{bet.get('sportsbook', 'unknown').upper()}]" if bet.get('sportsbook') else ""
+                        logger.info(f"      - {bet['team']}: ${bet['amount']:.2f} @ {american_odds_str}{sportsbook_str} (conf: {bet['confidence']:.1%})")
         
         if not quiet:
             logger.info(f"\n  TOTAL: {stats['total_bets']} bets, ${stats['total_wagered']:.2f} wagered")
@@ -564,6 +635,140 @@ def show_pnl(period: str = 'daily', quiet: bool = False) -> dict:
     return stats
 
 
+def print_detailed_summary(pred_stats: dict, bet_stats: dict, quiet: bool = False):
+    """Print a detailed, easy-to-read summary of predictions and bets."""
+    if quiet:
+        return
+    
+    today = date.today()
+    logger.info("")
+    logger.info("=" * 70)
+    logger.info(f"DAILY PREDICTION & BETTING SUMMARY - {today}")
+    logger.info("=" * 70)
+    
+    # Predictions section
+    if pred_stats.get('predictions'):
+        logger.info("\nGAME PREDICTIONS:")
+        logger.info("-" * 70)
+        for i, pred in enumerate(pred_stats['predictions'], 1):
+            logger.info(f"\n[{i}] {pred['matchup']}")
+            logger.info(f"    Predicted Winner: {pred['predicted_winner']}")
+            logger.info(f"    Confidence: {pred['confidence']:.1%}")
+            logger.info(f"    Home Win Prob: {pred['home_prob']:.1%} | Away Win Prob: {pred['away_prob']:.1%}")
+            if pred.get('margin'):
+                margin_str = f"{abs(pred['margin']):.1f} pts"
+                logger.info(f"    Predicted Margin: {pred['predicted_winner']} by {margin_str}")
+    
+    # Betting section
+    if bet_stats.get('strategies'):
+        logger.info("\n" + "=" * 70)
+        logger.info("BETTING SUMMARY:")
+        logger.info("-" * 70)
+        
+        for strategy_name, data in bet_stats['strategies'].items():
+            total_bets = data.get('bets', 0)
+            if total_bets > 0:
+                logger.info(f"\n{strategy_name.upper()} STRATEGY:")
+                logger.info(f"  Bankroll Before: ${data['bankroll_before']:,.2f}")
+                
+                # Show new vs existing bets
+                new_bets = data.get('bets_new', 0)
+                existing_bets = data.get('bets_existing', 0)
+                if new_bets > 0 and existing_bets > 0:
+                    logger.info(f"  New Bets Placed: {new_bets}")
+                    logger.info(f"  Existing Bets: {existing_bets}")
+                logger.info(f"  Total Bets: {total_bets}")
+                logger.info(f"  Total Wagered: ${data['wagered']:.2f}")
+                logger.info(f"  Bankroll After: ${data['bankroll_after']:,.2f}")
+                
+                # Show bets for this strategy
+                strategy_bets = [b for b in bet_stats.get('bet_details', []) if b['strategy'] == strategy_name]
+                if strategy_bets:
+                    logger.info(f"\n  Individual Bets:")
+                    for bet in strategy_bets:
+                        # Use original American odds if available, otherwise convert from decimal
+                        if 'american_odds' in bet and bet['american_odds'] is not None:
+                            american_odds_str = f"+{bet['american_odds']}" if bet['american_odds'] > 0 else str(bet['american_odds'])
+                        else:
+                            american_odds_str = decimal_to_american_odds(bet['odds'])
+                        
+                        # Show sportsbook if available
+                        sportsbook_str = f" [{bet.get('sportsbook', 'unknown').upper()}]" if bet.get('sportsbook') else ""
+                        logger.info(f"    - {bet['team']}: ${bet['amount']:.2f} @ {american_odds_str}{sportsbook_str} odds (Confidence: {bet['confidence']:.1%})")
+            else:
+                logger.info(f"\n{strategy_name.upper()} STRATEGY: No bets placed")
+        
+        logger.info(f"\n{'=' * 70}")
+        logger.info(f"TOTAL: {bet_stats.get('total_bets', 0)} bets, ${bet_stats.get('total_wagered', 0):.2f} wagered")
+    
+    logger.info("=" * 70)
+    logger.info("")
+
+
+def reset_bankrolls_for_today(quiet: bool = False) -> dict:
+    """Reset bankrolls to start fresh PNL tracking for today."""
+    from src.backtesting.betting_manager import BettingManager, STRATEGIES
+    from src.database.db_manager import DatabaseManager
+    from src.database.models import Bet, BankrollSnapshot, Game
+    
+    today = date.today()
+    stats = {'reset': 0, 'strategies': []}
+    
+    if not quiet:
+        logger.info(f"[INIT] Resetting bankrolls for {today} - starting fresh PNL tracking")
+    
+    try:
+        db = DatabaseManager()
+        betting_manager = BettingManager()
+        
+        with db.get_session() as session:
+            # Delete all bets for games on today's date or later
+            bets_to_delete = session.query(Bet).join(Game).filter(
+                Game.game_date >= today
+            ).all()
+            
+            bets_deleted = len(bets_to_delete)
+            for bet in bets_to_delete:
+                session.delete(bet)
+            
+            # Also reset all resolved bets from before today to zero profit
+            # This ensures bankroll starts at $25 (initial_bankroll)
+            old_bets = session.query(Bet).join(Game).filter(
+                Game.game_date < today,
+                Bet.outcome.isnot(None)
+            ).all()
+            
+            old_bets_reset = len(old_bets)
+            for bet in old_bets:
+                # Set profit to 0 instead of deleting (to maintain history)
+                bet.profit = 0.0
+            
+            # Delete bankroll snapshots from today onwards
+            snapshots_to_delete = session.query(BankrollSnapshot).filter(
+                BankrollSnapshot.snapshot_date >= today
+            ).all()
+            
+            snapshots_deleted = len(snapshots_to_delete)
+            for snapshot in snapshots_to_delete:
+                session.delete(snapshot)
+            
+            session.commit()
+            
+            stats['reset'] = bets_deleted + snapshots_deleted + old_bets_reset
+            stats['strategies'] = list(STRATEGIES.keys())
+            
+            if not quiet:
+                logger.info(f"  Reset complete: Deleted {bets_deleted} future bets, reset {old_bets_reset} old bet profits, deleted {snapshots_deleted} snapshots")
+                logger.info(f"  All strategies start with ${betting_manager.initial_bankroll:.2f} bankroll")
+                
+    except Exception as e:
+        logger.error(f"  Error resetting bankrolls: {e}")
+        import traceback
+        logger.debug(traceback.format_exc())
+    
+    return stats
+
+
 def run_morning_workflow(quiet: bool = False, enable_betting: bool = True, strategies: list = None):
     """Run morning workflow: fetch games, make predictions, and optionally place bets."""
     if not quiet:
@@ -581,6 +786,9 @@ def run_morning_workflow(quiet: bool = False, enable_betting: bool = True, strat
     bet_stats = {}
     if enable_betting:
         bet_stats = place_bets(quiet, strategies)
+    
+    # Print detailed summary
+    print_detailed_summary(pred_stats, bet_stats, quiet)
     
     if not quiet:
         logger.info("=" * 70)
@@ -683,7 +891,7 @@ def main():
     """Main entry point."""
     parser = ArgumentParser(
         description='Automated NBA Prediction Workflow with Betting',
-        epilog="""
+        epilog=""" 
 Examples:
   python daily_workflow.py                  # Run full workflow with betting
   python daily_workflow.py --morning        # Morning: fetch + predict + place bets
@@ -691,6 +899,7 @@ Examples:
   python daily_workflow.py --no-betting     # Run without betting
   python daily_workflow.py --strategy kelly # Use only Kelly strategy
   python daily_workflow.py --pnl weekly     # Show weekly PNL summary
+  python daily_workflow.py --reset-bankroll # Reset bankrolls to start fresh for today
         """
     )
     parser.add_argument('--morning', action='store_true',
@@ -707,6 +916,8 @@ Examples:
                        default='all', help='Betting strategy to use (default: all)')
     parser.add_argument('--pnl', type=str, choices=['daily', 'weekly', 'monthly', 'all'],
                        help='Show PNL summary for period')
+    parser.add_argument('--reset-bankroll', action='store_true',
+                       help='Reset bankrolls to start fresh PNL tracking for today')
     args = parser.parse_args()
     
     # Parse strategies
@@ -714,6 +925,11 @@ Examples:
     enable_betting = not args.no_betting
     
     try:
+        # Handle bankroll reset
+        if args.reset_bankroll:
+            reset_bankrolls_for_today(args.quiet)
+            return 0
+        
         # Handle PNL summary request
         if args.pnl:
             show_pnl(args.pnl, args.quiet)

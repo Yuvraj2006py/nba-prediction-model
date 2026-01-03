@@ -26,7 +26,7 @@ from src.backtesting.strategies import (
 logger = logging.getLogger(__name__)
 
 # Default initial bankroll for each strategy
-DEFAULT_INITIAL_BANKROLL = 10000.0
+DEFAULT_INITIAL_BANKROLL = 25.0
 
 # Available strategies
 STRATEGIES = {
@@ -66,29 +66,73 @@ class BettingManager:
             raise ValueError(f"Unknown strategy: {strategy_name}. Available: {list(STRATEGIES.keys())}")
         return STRATEGIES[strategy_name]()
     
-    def get_bankroll(self, strategy_name: str) -> float:
+    def get_bankroll(self, strategy_name: str, start_date: Optional[date] = None) -> float:
         """
         Get current bankroll for a strategy.
         
         Calculates from initial bankroll + all resolved bet profits.
+        If start_date is provided, only counts bets from that date onwards.
+        
+        Args:
+            strategy_name: Strategy name
+            start_date: Optional date to start counting profits from (for fresh starts)
         """
         with self.db_manager.get_session() as session:
-            # Get sum of all profits for this strategy
-            total_profit = session.query(func.sum(Bet.profit)).filter(
+            query = session.query(func.sum(Bet.profit)).filter(
                 Bet.strategy_name == strategy_name,
                 Bet.outcome.isnot(None)
-            ).scalar() or 0.0
+            )
+            
+            # If start_date is provided, only count bets from that date onwards
+            if start_date:
+                query = query.join(Game).filter(Game.game_date >= start_date)
+            
+            total_profit = query.scalar() or 0.0
             
             return self.initial_bankroll + total_profit
     
-    def get_odds_for_game(self, game_id: str) -> Optional[Dict[str, Any]]:
-        """Get betting odds for a game."""
+    def get_odds_for_game(self, game_id: str, sportsbook: str = 'draftkings') -> Optional[Dict[str, Any]]:
+        """
+        Get betting odds for a game from a specific sportsbook (default: DraftKings).
+        Falls back to FanDuel, then any other sportsbook if preferred not found.
+        
+        Args:
+            game_id: Game identifier
+            sportsbook: Preferred sportsbook name (default: 'draftkings')
+        """
         with self.db_manager.get_session() as session:
-            lines = session.query(BettingLine).filter(
-                BettingLine.game_id == game_id
-            ).order_by(BettingLine.created_at.desc()).all()
+            # Priority order: DraftKings -> FanDuel -> Any other
+            preferred_sportsbooks = ['draftkings', 'fanduel']
+            if sportsbook.lower() not in preferred_sportsbooks:
+                preferred_sportsbooks.insert(0, sportsbook.lower())
+            
+            lines = None
+            used_sportsbook = None
+            
+            # Try preferred sportsbooks in order
+            for sb in preferred_sportsbooks:
+                lines = session.query(BettingLine).filter(
+                    BettingLine.game_id == game_id,
+                    BettingLine.sportsbook == sb.lower()
+                ).order_by(BettingLine.created_at.desc()).all()
+                
+                if lines:
+                    used_sportsbook = sb
+                    break
+            
+            # If still not found, try any sportsbook
+            if not lines:
+                logger.debug(f"No {sportsbook} or FanDuel odds found for game {game_id}, trying other sportsbooks...")
+                lines = session.query(BettingLine).filter(
+                    BettingLine.game_id == game_id
+                ).order_by(BettingLine.created_at.desc()).all()
+                
+                if lines:
+                    used_sportsbook = lines[0].sportsbook
+                    logger.debug(f"Using {used_sportsbook} odds for game {game_id} (DraftKings/FanDuel not available)")
             
             if not lines:
+                logger.warning(f"No odds found for game {game_id}")
                 return None
             
             # Use most recent line
@@ -147,7 +191,8 @@ class BettingManager:
             
             for strategy_name in strategy_names:
                 strategy = self.get_strategy(strategy_name)
-                bankroll = self.get_bankroll(strategy_name)
+                # Get bankroll counting only from today (for fresh starts)
+                bankroll = self.get_bankroll(strategy_name, start_date=target_date)
                 
                 bets_placed = []
                 total_wagered = 0.0
@@ -218,11 +263,41 @@ class BettingManager:
                             team = session.query(Team).filter(Team.team_id == bet_decision['bet_team']).first()
                             team_name = team.team_name if team else bet_decision['bet_team']
                             
+                            # Get original American odds from BettingLine for display
+                            # Prioritize DraftKings, then FanDuel, then any other (same as get_odds_for_game)
+                            betting_line = None
+                            sportsbook_used = None
+                            for sb in ['draftkings', 'fanduel']:
+                                betting_line = session.query(BettingLine).filter(
+                                    BettingLine.game_id == game.game_id,
+                                    BettingLine.sportsbook == sb.lower()
+                                ).order_by(BettingLine.created_at.desc()).first()
+                                if betting_line:
+                                    sportsbook_used = sb
+                                    break
+                            
+                            # If still not found, get any sportsbook
+                            if not betting_line:
+                                betting_line = session.query(BettingLine).filter(
+                                    BettingLine.game_id == game.game_id
+                                ).order_by(BettingLine.created_at.desc()).first()
+                                if betting_line:
+                                    sportsbook_used = betting_line.sportsbook
+                            
+                            american_odds = None
+                            if betting_line:
+                                if bet_decision['bet_team'] == game.home_team_id:
+                                    american_odds = betting_line.moneyline_home
+                                else:
+                                    american_odds = betting_line.moneyline_away
+                            
                             bets_placed.append({
                                 'game_id': game.game_id,
                                 'team': team_name,
                                 'amount': bet_decision['bet_amount'],
-                                'odds': bet_decision['odds'],
+                                'odds': bet_decision['odds'],  # Decimal odds for calculations
+                                'american_odds': american_odds,  # Original American odds for display
+                                'sportsbook': sportsbook_used,  # Track which sportsbook was used
                                 'confidence': bet_decision.get('confidence', 0),
                                 'ev': bet_decision['expected_value']
                             })
@@ -233,15 +308,96 @@ class BettingManager:
                 
                 session.commit()
                 
+                # Get existing bets for this strategy/date to include in summary
+                existing_bets = self.get_existing_bets_for_date(target_date, strategy_name)
+                
+                # Calculate total pending bets (new + existing)
+                total_pending = total_wagered + sum(b['amount'] for b in existing_bets)
+                
+                # Combine new and existing bets for display
+                all_bets = bets_placed + existing_bets
+                total_all_wagered = total_pending
+                
                 results[strategy_name] = {
-                    'bets_placed': len(bets_placed),
-                    'total_wagered': total_wagered,
+                    'bets_placed': len(bets_placed),  # New bets only
+                    'bets_existing': len(existing_bets),  # Existing bets
+                    'total_wagered': total_wagered,  # New bets wagered
+                    'total_all_wagered': total_all_wagered,  # All bets (new + existing)
                     'bankroll_before': bankroll,
-                    'bankroll_after': bankroll - total_wagered,
-                    'bets': bets_placed
+                    'bankroll_after': bankroll - total_pending,  # Subtract ALL pending bets
+                    'bets': bets_placed,  # New bets only
+                    'all_bets': all_bets  # All bets for display
                 }
         
         return {'status': 'complete', 'date': str(target_date), 'strategies': results}
+    
+    def get_existing_bets_for_date(self, target_date: date, strategy_name: str) -> List[Dict[str, Any]]:
+        """
+        Get existing bets for a date and strategy (for display purposes).
+        
+        Args:
+            target_date: Date to get bets for
+            strategy_name: Strategy name
+            
+        Returns:
+            List of bet dictionaries
+        """
+        existing_bets = []
+        
+        with self.db_manager.get_session() as session:
+            bets = session.query(Bet).join(Game).filter(
+                Game.game_date == target_date,
+                Bet.strategy_name == strategy_name
+            ).all()
+            
+            for bet in bets:
+                # Get team name
+                from src.database.models import Team
+                team = session.query(Team).filter(Team.team_id == bet.bet_team).first()
+                team_name = team.team_name if team else bet.bet_team
+                
+                # Get original American odds from BettingLine
+                # Prioritize DraftKings, then FanDuel, then any other (same as get_odds_for_game)
+                betting_line = None
+                sportsbook_used = None
+                for sb in ['draftkings', 'fanduel']:
+                    betting_line = session.query(BettingLine).filter(
+                        BettingLine.game_id == bet.game_id,
+                        BettingLine.sportsbook == sb.lower()
+                    ).order_by(BettingLine.created_at.desc()).first()
+                    if betting_line:
+                        sportsbook_used = sb
+                        break
+                
+                # If still not found, get any sportsbook
+                if not betting_line:
+                    betting_line = session.query(BettingLine).filter(
+                        BettingLine.game_id == bet.game_id
+                    ).order_by(BettingLine.created_at.desc()).first()
+                    if betting_line:
+                        sportsbook_used = betting_line.sportsbook
+                
+                # Determine if bet was on home or away team
+                game = session.query(Game).filter(Game.game_id == bet.game_id).first()
+                american_odds = None
+                if game and betting_line:
+                    if bet.bet_team == game.home_team_id:
+                        american_odds = betting_line.moneyline_home
+                    else:
+                        american_odds = betting_line.moneyline_away
+                
+                existing_bets.append({
+                    'game_id': bet.game_id,
+                    'team': team_name,
+                    'amount': bet.bet_amount,
+                    'odds': bet.odds,  # Decimal odds for calculations
+                    'american_odds': american_odds,  # Original American odds for display
+                    'sportsbook': sportsbook_used,  # Track which sportsbook was used
+                    'confidence': bet.confidence or 0,
+                    'ev': bet.expected_value
+                })
+        
+        return existing_bets
     
     def resolve_bets_for_date(self, target_date: date) -> Dict[str, Any]:
         """

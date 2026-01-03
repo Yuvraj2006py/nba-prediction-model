@@ -291,6 +291,10 @@ class BettingOddsCollector:
         stored_count = 0
         
         try:
+            # Get home and away team names from API response for matching
+            api_home_team = odds_data.get('home_team', '')
+            api_away_team = odds_data.get('away_team', '')
+            
             bookmakers = odds_data.get('bookmakers', [])
             for bookmaker in bookmakers:
                 sportsbook = bookmaker.get('key', 'unknown')
@@ -300,7 +304,9 @@ class BettingOddsCollector:
                     line_data = self._extract_betting_line(
                         game_id,
                         sportsbook,
-                        market
+                        market,
+                        api_home_team=api_home_team,
+                        api_away_team=api_away_team
                     )
                     if line_data:
                         try:
@@ -314,12 +320,14 @@ class BettingOddsCollector:
             logger.error(f"Error storing odds for game {game_id}: {e}")
             return 0
     
-    def parse_and_store_odds(self, odds_data: List[Dict[str, Any]]) -> int:
+    def parse_and_store_odds(self, odds_data: List[Dict[str, Any]], preferred_sportsbook: str = 'draftkings') -> int:
         """
         Parse odds data and store in database.
+        Prioritizes odds from preferred sportsbook (default: DraftKings).
         
         Args:
             odds_data: List of odds dictionaries from API
+            preferred_sportsbook: Preferred sportsbook to prioritize (default: 'draftkings')
             
         Returns:
             Number of betting lines stored
@@ -347,7 +355,18 @@ class BettingOddsCollector:
                 
                 # Extract and store betting lines
                 bookmakers = game_odds.get('bookmakers', [])
-                for bookmaker in bookmakers:
+                
+                # Sort bookmakers to prioritize preferred sportsbook
+                bookmakers_sorted = sorted(
+                    bookmakers,
+                    key=lambda b: b.get('key', '').lower() != preferred_sportsbook.lower()
+                )
+                
+                # Get home and away team names from API response for matching
+                api_home_team = game_odds.get('home_team', '')
+                api_away_team = game_odds.get('away_team', '')
+                
+                for bookmaker in bookmakers_sorted:
                     sportsbook = bookmaker.get('key', 'unknown')
                     markets = bookmaker.get('markets', [])
                     
@@ -355,7 +374,9 @@ class BettingOddsCollector:
                         line_data = self._extract_betting_line(
                             game_id,
                             sportsbook,
-                            market
+                            market,
+                            api_home_team=api_home_team,
+                            api_away_team=api_away_team
                         )
                         if line_data:
                             try:
@@ -521,7 +542,9 @@ class BettingOddsCollector:
         self,
         game_id: str,
         sportsbook: str,
-        market: Dict[str, Any]
+        market: Dict[str, Any],
+        api_home_team: str = '',
+        api_away_team: str = ''
     ) -> Optional[Dict[str, Any]]:
         """
         Extract betting line from market data.
@@ -530,6 +553,8 @@ class BettingOddsCollector:
             game_id: Game ID
             sportsbook: Sportsbook name
             market: Market dictionary from API
+            api_home_team: Home team name from API (for matching outcomes)
+            api_away_team: Away team name from API (for matching outcomes)
             
         Returns:
             Betting line dictionary or None
@@ -550,12 +575,43 @@ class BettingOddsCollector:
             
             if market_key == 'h2h':  # Moneyline
                 for outcome in outcomes:
-                    name = outcome.get('name', '')
+                    name = outcome.get('name', '').strip()
                     price = outcome.get('price', None)
                     
-                    # Determine if home or away (would need team mapping)
-                    # For now, store both
-                    if price is not None:
+                    if price is None:
+                        continue
+                    
+                    # Match outcome name to home or away team
+                    # Try various matching strategies
+                    name_lower = name.lower()
+                    home_lower = api_home_team.lower() if api_home_team else ''
+                    away_lower = api_away_team.lower() if api_away_team else ''
+                    
+                    is_home = False
+                    is_away = False
+                    
+                    if home_lower and away_lower:
+                        # Check if outcome name matches home team
+                        if (name_lower == home_lower or 
+                            name_lower in home_lower or 
+                            home_lower in name_lower or
+                            any(word in name_lower for word in home_lower.split() if len(word) > 3)):
+                            is_home = True
+                        # Check if outcome name matches away team
+                        elif (name_lower == away_lower or 
+                              name_lower in away_lower or 
+                              away_lower in name_lower or
+                              any(word in name_lower for word in away_lower.split() if len(word) > 3)):
+                            is_away = True
+                    
+                    # Store odds in correct field
+                    if is_home:
+                        line_data['moneyline_home'] = int(price)
+                    elif is_away:
+                        line_data['moneyline_away'] = int(price)
+                    else:
+                        # Fallback: if we can't match, store in order (first = home, second = away)
+                        # This is not ideal but better than nothing
                         if line_data['moneyline_home'] is None:
                             line_data['moneyline_home'] = int(price)
                         else:
@@ -563,12 +619,42 @@ class BettingOddsCollector:
             
             elif market_key == 'spreads':  # Point spread
                 for outcome in outcomes:
-                    name = outcome.get('name', '')
+                    name = outcome.get('name', '').strip()
                     point = outcome.get('point', None)
                     price = outcome.get('price', None)
                     
-                    if point is not None:
-                        point_float = float(point)
+                    if point is None:
+                        continue
+                    
+                    point_float = float(point)
+                    
+                    # Match outcome name to home or away team (same logic as moneyline)
+                    name_lower = name.lower()
+                    home_lower = api_home_team.lower() if api_home_team else ''
+                    away_lower = api_away_team.lower() if api_away_team else ''
+                    
+                    is_home = False
+                    is_away = False
+                    
+                    if home_lower and away_lower:
+                        if (name_lower == home_lower or 
+                            name_lower in home_lower or 
+                            home_lower in name_lower or
+                            any(word in name_lower for word in home_lower.split() if len(word) > 3)):
+                            is_home = True
+                        elif (name_lower == away_lower or 
+                              name_lower in away_lower or 
+                              away_lower in name_lower or
+                              any(word in name_lower for word in away_lower.split() if len(word) > 3)):
+                            is_away = True
+                    
+                    # Store spread in correct field
+                    if is_home:
+                        line_data['point_spread_home'] = point_float
+                    elif is_away:
+                        line_data['point_spread_away'] = point_float
+                    else:
+                        # Fallback: store in order
                         if line_data['point_spread_home'] is None:
                             line_data['point_spread_home'] = point_float
                         else:
