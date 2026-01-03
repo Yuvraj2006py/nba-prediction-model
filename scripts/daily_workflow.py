@@ -254,6 +254,74 @@ def update_scores(quiet: bool = False) -> dict:
     return stats
 
 
+def generate_features_for_finished_games(quiet: bool = False) -> dict:
+    """Step 3.5: Generate features for finished games that don't have features yet."""
+    from src.database.db_manager import DatabaseManager
+    from src.database.models import Game, GameMatchupFeatures
+    from src.features.feature_aggregator import FeatureAggregator
+    
+    today = date.today()
+    yesterday = today - timedelta(days=1)
+    stats = {'processed': 0, 'generated': 0, 'skipped': 0, 'errors': 0}
+    
+    if not quiet:
+        logger.info(f"[STEP 3.5] Generating features for finished games")
+    
+    try:
+        db = DatabaseManager()
+        aggregator = FeatureAggregator(db)
+        
+        # Check both yesterday and today for finished games
+        for check_date in [yesterday, today]:
+            with db.get_session() as session:
+                # Find finished games without features
+                games_with_features = session.query(GameMatchupFeatures.game_id).subquery()
+                
+                finished_games = session.query(Game).filter(
+                    Game.game_date == check_date,
+                    Game.game_status == 'finished',
+                    Game.home_score.isnot(None),
+                    Game.away_score.isnot(None),
+                    ~Game.game_id.in_(session.query(games_with_features))
+                ).all()
+                
+                stats['processed'] += len(finished_games)
+                
+                for game in finished_games:
+                    try:
+                        # Generate features
+                        feature_df = aggregator.create_feature_vector(
+                            game_id=game.game_id,
+                            home_team_id=game.home_team_id,
+                            away_team_id=game.away_team_id,
+                            end_date=game.game_date,
+                            use_cache=False  # We'll save manually
+                        )
+                        
+                        if feature_df is not None and not feature_df.empty:
+                            # Save to database
+                            feature_dict = feature_df.iloc[0].to_dict()
+                            aggregator.save_features_to_db(game.game_id, feature_dict)
+                            stats['generated'] += 1
+                        else:
+                            stats['errors'] += 1
+                            
+                    except Exception as e:
+                        logger.debug(f"Error generating features for {game.game_id}: {e}")
+                        stats['errors'] += 1
+                        continue
+        
+        if not quiet:
+            logger.info(f"  Generated features for {stats['generated']} games ({stats['skipped']} already had features)")
+            
+    except Exception as e:
+        logger.error(f"  Error generating features: {e}")
+        import traceback
+        logger.debug(traceback.format_exc())
+    
+    return stats
+
+
 def evaluate_predictions(quiet: bool = False) -> dict:
     """Step 4: Evaluate yesterday's predictions."""
     from src.database.db_manager import DatabaseManager
@@ -528,7 +596,7 @@ def run_morning_workflow(quiet: bool = False, enable_betting: bool = True, strat
 
 
 def run_evening_workflow(quiet: bool = False, enable_betting: bool = True):
-    """Run evening workflow: update scores, evaluate, and resolve bets."""
+    """Run evening workflow: update scores, generate features, evaluate, and resolve bets."""
     if not quiet:
         logger.info("=" * 70)
         logger.info(f"EVENING WORKFLOW - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
@@ -536,6 +604,9 @@ def run_evening_workflow(quiet: bool = False, enable_betting: bool = True):
     
     # Step 3: Update scores
     score_stats = update_scores(quiet)
+    
+    # Step 3.5: Generate features for finished games
+    feature_stats = generate_features_for_finished_games(quiet)
     
     # Step 4: Evaluate predictions
     eval_stats = evaluate_predictions(quiet)
@@ -549,6 +620,7 @@ def run_evening_workflow(quiet: bool = False, enable_betting: bool = True):
         logger.info("=" * 70)
         logger.info("EVENING WORKFLOW COMPLETE")
         logger.info(f"  Games updated: {score_stats['updated']}")
+        logger.info(f"  Features generated: {feature_stats['generated']}")
         logger.info(f"  Accuracy: {eval_stats['correct']}/{eval_stats['games']} ({eval_stats['accuracy']:.1%})")
         if enable_betting and bet_stats:
             pnl = bet_stats.get('total_profit', 0)
@@ -557,7 +629,7 @@ def run_evening_workflow(quiet: bool = False, enable_betting: bool = True):
             logger.info(f"  Daily PNL: {pnl_str}")
         logger.info("=" * 70)
     
-    return {'scores': score_stats, 'evaluation': eval_stats, 'bets': bet_stats}
+    return {'scores': score_stats, 'features': feature_stats, 'evaluation': eval_stats, 'bets': bet_stats}
 
 
 def run_full_workflow(quiet: bool = False, enable_betting: bool = True, strategies: list = None):
@@ -578,6 +650,10 @@ def run_full_workflow(quiet: bool = False, enable_betting: bool = True, strategi
         results['bets_placed'] = place_bets(quiet, strategies)
     
     results['scores'] = update_scores(quiet)
+    
+    # Generate features for finished games
+    results['features'] = generate_features_for_finished_games(quiet)
+    
     results['evaluation'] = evaluate_predictions(quiet)
     
     # Resolve bets from yesterday
@@ -592,6 +668,7 @@ def run_full_workflow(quiet: bool = False, enable_betting: bool = True, strategi
         if enable_betting:
             logger.info(f"  Bets placed: {results.get('bets_placed', {}).get('total_bets', 0)}")
         logger.info(f"  Scores updated: {results['scores']['updated']}")
+        logger.info(f"  Features generated: {results.get('features', {}).get('generated', 0)}")
         logger.info(f"  Yesterday's accuracy: {results['evaluation']['accuracy']:.1%}")
         if enable_betting:
             pnl = results.get('bets_resolved', {}).get('total_profit', 0)
@@ -622,8 +699,8 @@ Examples:
                        help='Run evening workflow only (update + evaluate + resolve)')
     parser.add_argument('--quiet', action='store_true',
                        help='Suppress detailed output (for automation)')
-    parser.add_argument('--step', type=int, choices=[1, 2, 3, 4, 5, 6],
-                       help='Run specific step (1=fetch, 2=predict, 3=update, 4=evaluate, 5=place bets, 6=resolve bets)')
+    parser.add_argument('--step', type=int, choices=[1, 2, 3, 4, 5, 6, 7],
+                       help='Run specific step (1=fetch, 2=predict, 3=update, 4=features, 5=evaluate, 6=place bets, 7=resolve bets)')
     parser.add_argument('--no-betting', action='store_true',
                        help='Disable betting (predictions only)')
     parser.add_argument('--strategy', type=str, choices=['kelly', 'ev', 'confidence', 'all'],
@@ -651,10 +728,12 @@ Examples:
             elif args.step == 3:
                 update_scores(args.quiet)
             elif args.step == 4:
-                evaluate_predictions(args.quiet)
+                generate_features_for_finished_games(args.quiet)
             elif args.step == 5:
-                place_bets(args.quiet, strategies)
+                evaluate_predictions(args.quiet)
             elif args.step == 6:
+                place_bets(args.quiet, strategies)
+            elif args.step == 7:
                 resolve_bets(args.quiet)
         elif args.morning:
             run_morning_workflow(args.quiet, enable_betting, strategies)
