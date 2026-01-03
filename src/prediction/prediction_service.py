@@ -18,6 +18,7 @@ import numpy as np
 from src.database.db_manager import DatabaseManager
 from src.database.models import Game, TeamRollingFeatures, GameMatchupFeatures, Prediction
 from src.models.xgboost_model import XGBoostModel
+from src.features.feature_aggregator import FeatureAggregator
 from config.settings import get_settings
 
 logger = logging.getLogger(__name__)
@@ -159,9 +160,20 @@ class PredictionService:
                 team_id=game.away_team_id
             ).first()
             
+            # If rolling features don't exist, calculate them on-the-fly
             if not home_features or not away_features:
-                logger.warning(f"Missing rolling features for game {game_id}")
-                return None
+                logger.info(f"Rolling features not found for game {game_id}, calculating on-the-fly...")
+                feature_df = self._calculate_features_on_the_fly(game_id, game)
+                if feature_df is not None:
+                    # Handle missing values
+                    feature_df = self._handle_missing_values(feature_df)
+                    # Align features if target names provided
+                    if target_feature_names:
+                        feature_df = self._align_features(feature_df, target_feature_names)
+                    return feature_df
+                else:
+                    logger.warning(f"Could not calculate features on-the-fly for game {game_id}")
+                    return None
             
             # Extract team rolling features (SAME logic as DataLoader._extract_rolling_features)
             feature_dict = self._extract_rolling_features(home_features, away_features)
@@ -175,7 +187,7 @@ class PredictionService:
                 matchup_dict = self._extract_matchup_features(matchup_features)
                 feature_dict.update(matchup_dict)
             else:
-                logger.warning(f"Missing matchup features for game {game_id}")
+                logger.debug(f"Missing matchup features for game {game_id}, will be calculated on-the-fly if needed")
         
         # Create DataFrame
         feature_df = pd.DataFrame([feature_dict])
@@ -188,6 +200,48 @@ class PredictionService:
             feature_df = self._align_features(feature_df, target_feature_names)
         
         return feature_df
+    
+    def _calculate_features_on_the_fly(
+        self,
+        game_id: str,
+        game: Game
+    ) -> Optional[pd.DataFrame]:
+        """
+        Calculate features on-the-fly using FeatureAggregator when database records don't exist.
+        
+        This is used for games that haven't finished yet (e.g., today's games).
+        
+        Args:
+            game_id: Game identifier
+            game: Game object
+            
+        Returns:
+            DataFrame with features, or None if calculation fails
+        """
+        try:
+            aggregator = FeatureAggregator(self.db_manager)
+            
+            # Calculate features using FeatureAggregator
+            feature_df = aggregator.create_feature_vector(
+                game_id=game_id,
+                home_team_id=game.home_team_id,
+                away_team_id=game.away_team_id,
+                end_date=game.game_date,
+                use_cache=False  # Don't use cache, calculate fresh
+            )
+            
+            if feature_df is not None and not feature_df.empty:
+                logger.debug(f"Successfully calculated features on-the-fly for game {game_id}")
+                return feature_df
+            else:
+                logger.warning(f"FeatureAggregator returned empty result for game {game_id}")
+                return None
+                
+        except Exception as e:
+            logger.error(f"Error calculating features on-the-fly for game {game_id}: {e}")
+            import traceback
+            logger.debug(traceback.format_exc())
+            return None
     
     def _extract_rolling_features(
         self,
