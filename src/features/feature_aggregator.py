@@ -191,6 +191,42 @@ class FeatureAggregator:
         block_rate = self.team_calc.calculate_block_rate(team_id, games_back, end_date)
         features[f'{prefix}block_rate'] = block_rate
         
+        # Rolling stats: Last 5 games
+        l5_stats = self.team_calc.calculate_rolling_stats(team_id, 5, end_date)
+        features[f'{prefix}l5_points'] = l5_stats.get('points')
+        features[f'{prefix}l5_points_allowed'] = l5_stats.get('points_allowed')
+        features[f'{prefix}l5_fg_pct'] = l5_stats.get('fg_pct')
+        features[f'{prefix}l5_three_pct'] = l5_stats.get('three_pct')
+        features[f'{prefix}l5_ft_pct'] = l5_stats.get('ft_pct')
+        features[f'{prefix}l5_rebounds'] = l5_stats.get('rebounds')
+        features[f'{prefix}l5_assists'] = l5_stats.get('assists')
+        features[f'{prefix}l5_turnovers'] = l5_stats.get('turnovers')
+        features[f'{prefix}l5_steals'] = l5_stats.get('steals')
+        features[f'{prefix}l5_blocks'] = l5_stats.get('blocks')
+        features[f'{prefix}l5_win_pct'] = l5_stats.get('win_pct')
+        
+        # Rolling stats: Last 10 games
+        l10_stats = self.team_calc.calculate_rolling_stats(team_id, 10, end_date)
+        features[f'{prefix}l10_points'] = l10_stats.get('points')
+        features[f'{prefix}l10_points_allowed'] = l10_stats.get('points_allowed')
+        features[f'{prefix}l10_fg_pct'] = l10_stats.get('fg_pct')
+        features[f'{prefix}l10_three_pct'] = l10_stats.get('three_pct')
+        features[f'{prefix}l10_ft_pct'] = l10_stats.get('ft_pct')
+        features[f'{prefix}l10_rebounds'] = l10_stats.get('rebounds')
+        features[f'{prefix}l10_assists'] = l10_stats.get('assists')
+        features[f'{prefix}l10_turnovers'] = l10_stats.get('turnovers')
+        features[f'{prefix}l10_steals'] = l10_stats.get('steals')
+        features[f'{prefix}l10_blocks'] = l10_stats.get('blocks')
+        features[f'{prefix}l10_win_pct'] = l10_stats.get('win_pct')
+        
+        # Rolling stats: Last 20 games
+        l20_stats = self.team_calc.calculate_rolling_stats(team_id, 20, end_date)
+        features[f'{prefix}l20_points'] = l20_stats.get('points')
+        features[f'{prefix}l20_points_allowed'] = l20_stats.get('points_allowed')
+        features[f'{prefix}l20_fg_pct'] = l20_stats.get('fg_pct')
+        features[f'{prefix}l20_three_pct'] = l20_stats.get('three_pct')
+        features[f'{prefix}l20_win_pct'] = l20_stats.get('win_pct')
+        
         return features
     
     def _calculate_matchup_features(
@@ -242,18 +278,38 @@ class FeatureAggregator:
         """Calculate contextual features."""
         features = {}
         
-        # Rest days
+        # Rest days (using model's expected name: days_rest)
         home_rest = self.contextual_calc.calculate_rest_days(home_team_id, end_date)
         away_rest = self.contextual_calc.calculate_rest_days(away_team_id, end_date)
-        features['home_rest_days'] = home_rest if home_rest is not None else 0
-        features['away_rest_days'] = away_rest if away_rest is not None else 0
+        features['home_days_rest'] = home_rest if home_rest is not None else 0
+        features['away_days_rest'] = away_rest if away_rest is not None else 0
+        features['home_rest_days'] = home_rest if home_rest is not None else 0  # Keep for compatibility
+        features['away_rest_days'] = away_rest if away_rest is not None else 0  # Keep for compatibility
         features['rest_days_differential'] = (home_rest - away_rest) if (home_rest and away_rest) else None
         
-        # Back-to-back
+        # Back-to-back (using model's expected name: is_back_to_back)
         home_b2b = self.contextual_calc.is_back_to_back(home_team_id, end_date)
         away_b2b = self.contextual_calc.is_back_to_back(away_team_id, end_date)
-        features['home_is_b2b'] = 1 if home_b2b else 0
-        features['away_is_b2b'] = 1 if away_b2b else 0
+        features['home_is_back_to_back'] = 1 if home_b2b else 0
+        features['away_is_back_to_back'] = 1 if away_b2b else 0
+        features['home_is_b2b'] = 1 if home_b2b else 0  # Keep for compatibility
+        features['away_is_b2b'] = 1 if away_b2b else 0  # Keep for compatibility
+        
+        # Games in last 7 days
+        home_games_7d = self.contextual_calc.calculate_games_in_last_7_days(home_team_id, end_date)
+        away_games_7d = self.contextual_calc.calculate_games_in_last_7_days(away_team_id, end_date)
+        features['home_games_in_last_7_days'] = home_games_7d
+        features['away_games_in_last_7_days'] = away_games_7d
+        
+        # Home/away win percentages
+        home_home_wpct = self.contextual_calc.calculate_home_win_pct(home_team_id, 20, end_date)
+        home_away_wpct = self.contextual_calc.calculate_away_win_pct(home_team_id, 20, end_date)
+        away_home_wpct = self.contextual_calc.calculate_home_win_pct(away_team_id, 20, end_date)
+        away_away_wpct = self.contextual_calc.calculate_away_win_pct(away_team_id, 20, end_date)
+        features['home_home_win_pct'] = home_home_wpct
+        features['home_away_win_pct'] = home_away_wpct
+        features['away_home_win_pct'] = away_home_wpct
+        features['away_away_win_pct'] = away_away_wpct
         
         # Home advantage (always 1 for home team in this context)
         features['is_home_advantage'] = 1

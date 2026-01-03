@@ -197,4 +197,83 @@ class ContextualFeatureCalculator:
         
         days_until = (next_game.game_date - game_date).days
         return max(days_until, 0)  # Ensure non-negative
+    
+    def calculate_games_in_last_7_days(
+        self,
+        team_id: str,
+        game_date: date
+    ) -> int:
+        """
+        Calculate number of games played in the last 7 days.
+        
+        Args:
+            team_id: Team identifier
+            game_date: Date of the current game
+            
+        Returns:
+            Number of games in last 7 days
+        """
+        start_date = game_date - timedelta(days=7)
+        games = self.db_manager.get_games(
+            team_id=team_id,
+            start_date=start_date,
+            end_date=game_date - timedelta(days=1)  # Exclude current game
+        )
+        return len(games)
+    
+    def calculate_home_win_pct(
+        self,
+        team_id: str,
+        games_back: int = 20,
+        end_date: Optional[date] = None
+    ) -> Optional[float]:
+        """
+        Calculate win percentage at home.
+        
+        Args:
+            team_id: Team identifier
+            games_back: Number of recent home games to consider
+            end_date: Cutoff date
+            
+        Returns:
+            Home win percentage or None
+        """
+        from src.features.team_features import TeamFeatureCalculator
+        team_calc = TeamFeatureCalculator(self.db_manager)
+        return team_calc.calculate_win_percentage(team_id, games_back, True, end_date)
+    
+    def calculate_away_win_pct(
+        self,
+        team_id: str,
+        games_back: int = 20,
+        end_date: Optional[date] = None
+    ) -> Optional[float]:
+        """
+        Calculate win percentage on the road.
+        
+        Args:
+            team_id: Team identifier
+            games_back: Number of recent away games to consider
+            end_date: Cutoff date
+            
+        Returns:
+            Away win percentage or None
+        """
+        # Get away games (where team is NOT home)
+        games = self.db_manager.get_games(
+            team_id=team_id,
+            end_date=end_date,
+            limit=games_back * 2
+        )
+        
+        # Filter for away games only
+        away_games = [g for g in games if g.away_team_id == team_id]
+        away_games = sorted(away_games, key=lambda x: x.game_date, reverse=True)[:games_back]
+        
+        if len(away_games) < 3:
+            return None
+        
+        wins = sum(1 for g in away_games if g.winner == team_id)
+        win_pct = (wins / len(away_games)) * 100
+        return round(win_pct, 2)
 

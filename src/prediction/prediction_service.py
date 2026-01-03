@@ -214,6 +214,7 @@ class PredictionService:
         Calculate features on-the-fly using FeatureAggregator when database records don't exist.
         
         This is used for games that haven't finished yet (e.g., today's games).
+        Falls back to using most recent TeamRollingFeatures if available.
         
         Args:
             game_id: Game identifier
@@ -223,6 +224,52 @@ class PredictionService:
             DataFrame with features, or None if calculation fails
         """
         try:
+            # First, try to use most recent TeamRollingFeatures as baseline
+            with self.db_manager.get_session() as session:
+                # Get most recent features for home team
+                home_recent = session.query(TeamRollingFeatures).filter(
+                    TeamRollingFeatures.team_id == game.home_team_id,
+                    TeamRollingFeatures.game_date < game.game_date
+                ).order_by(TeamRollingFeatures.game_date.desc()).first()
+                
+                # Get most recent features for away team
+                away_recent = session.query(TeamRollingFeatures).filter(
+                    TeamRollingFeatures.team_id == game.away_team_id,
+                    TeamRollingFeatures.game_date < game.game_date
+                ).order_by(TeamRollingFeatures.game_date.desc()).first()
+                
+                # If we have recent features, use them as baseline and only update what's needed
+                if home_recent and away_recent:
+                    logger.debug(f"Using recent TeamRollingFeatures as baseline for game {game_id}")
+                    feature_dict = self._extract_rolling_features(home_recent, away_recent)
+                    
+                    # Get matchup features
+                    matchup_features = session.query(GameMatchupFeatures).filter_by(
+                        game_id=game_id
+                    ).first()
+                    
+                    if matchup_features:
+                        feature_dict.update(self._extract_matchup_features(matchup_features))
+                    else:
+                        # Calculate matchup features on-the-fly
+                        from src.features.feature_aggregator import FeatureAggregator
+                        aggregator = FeatureAggregator(self.db_manager)
+                        matchup_dict = aggregator._calculate_matchup_features(
+                            game.home_team_id, game.away_team_id, game.game_date, 10
+                        )
+                        feature_dict.update(matchup_dict)
+                    
+                    # Add contextual features
+                    contextual_dict = aggregator._calculate_contextual_features(
+                        game_id, game.home_team_id, game.away_team_id, game.game_date
+                    )
+                    feature_dict.update(contextual_dict)
+                    
+                    # Create DataFrame
+                    feature_df = pd.DataFrame([feature_dict])
+                    return feature_df
+            
+            # Fall back to full on-the-fly calculation
             aggregator = FeatureAggregator(self.db_manager)
             
             # Calculate features using FeatureAggregator
@@ -231,7 +278,8 @@ class PredictionService:
                 home_team_id=game.home_team_id,
                 away_team_id=game.away_team_id,
                 end_date=game.game_date,
-                use_cache=False  # Don't use cache, calculate fresh
+                use_cache=False,  # Don't use cache, calculate fresh
+                include_betting_features=True
             )
             
             if feature_df is not None and not feature_df.empty:
@@ -557,6 +605,29 @@ class PredictionService:
             
             if existing:
                 if update_existing:
+                    # Check if prediction changed significantly (winner changed)
+                    old_winner = existing.predicted_winner
+                    new_winner = prediction.get('predicted_winner')
+                    
+                    # If predicted winner changed, invalidate existing bets (if game hasn't started)
+                    if old_winner != new_winner:
+                        from src.database.models import Game, Bet
+                        game = session.query(Game).filter(Game.game_id == game_id).first()
+                        
+                        if game and game.game_status == 'scheduled':
+                            # Delete existing bets for this game (they're based on old prediction)
+                            bets_to_delete = session.query(Bet).filter(
+                                Bet.game_id == game_id
+                            ).all()
+                            
+                            if bets_to_delete:
+                                logger.info(
+                                    f"Prediction changed for {game_id}: {old_winner} -> {new_winner}. "
+                                    f"Deleting {len(bets_to_delete)} existing bet(s) for unscheduled game."
+                                )
+                                for bet in bets_to_delete:
+                                    session.delete(bet)
+                    
                     # Update existing prediction
                     existing.predicted_winner = prediction.get('predicted_winner')
                     existing.win_probability_home = prediction['win_probability_home']

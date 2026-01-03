@@ -758,6 +758,146 @@ class TeamFeatureCalculator:
         block_rate = (total_blocks / total_possessions) * 100
         return round(block_rate, 2)
     
+    def calculate_rolling_stats(
+        self,
+        team_id: str,
+        games_back: int,
+        end_date: Optional[date] = None
+    ) -> Dict[str, Optional[float]]:
+        """
+        Calculate rolling statistics for last N games.
+        
+        Uses Game records if TeamStats not available (for on-the-fly calculation).
+        
+        Args:
+            team_id: Team identifier
+            games_back: Number of games to look back (5, 10, or 20)
+            end_date: Cutoff date (to avoid data leakage)
+            
+        Returns:
+            Dictionary with rolling stats: points, points_allowed, fg_pct, three_pct,
+            ft_pct, rebounds, assists, turnovers, steals, blocks, win_pct
+        """
+        # Try TeamStats first (more detailed)
+        stats_history = self.db_manager.get_team_stats_history(
+            team_id, games_back, end_date
+        )
+        
+        # If no TeamStats, fall back to Game records
+        if len(stats_history) < 1:
+            # Use Game records to calculate basic stats
+            games = self.db_manager.get_games(
+                team_id=team_id,
+                end_date=end_date,
+                limit=games_back
+            )
+            
+            # Filter for finished games only
+            finished_games = [g for g in games if g.game_status == 'finished' and g.home_score is not None and g.away_score is not None]
+            finished_games = sorted(finished_games, key=lambda x: x.game_date, reverse=True)[:games_back]
+            
+            if len(finished_games) < 1:
+                return {
+                    'points': None, 'points_allowed': None, 'fg_pct': None,
+                    'three_pct': None, 'ft_pct': None, 'rebounds': None,
+                    'assists': None, 'turnovers': None, 'steals': None,
+                    'blocks': None, 'win_pct': None
+                }
+            
+            # Calculate from Game records (limited stats available)
+            total_points = 0
+            total_points_allowed = 0
+            wins = 0
+            
+            for game in finished_games:
+                if game.home_team_id == team_id:
+                    points = game.home_score or 0
+                    points_allowed = game.away_score or 0
+                else:
+                    points = game.away_score or 0
+                    points_allowed = game.home_score or 0
+                
+                total_points += points
+                total_points_allowed += points_allowed
+                
+                if game.winner == team_id:
+                    wins += 1
+            
+            num_games = len(finished_games)
+            win_pct = wins / num_games if num_games > 0 else None
+            
+            # For Game records, we don't have detailed stats, so return what we can
+            return {
+                'points': round(total_points / num_games, 2) if num_games > 0 else None,
+                'points_allowed': round(total_points_allowed / num_games, 2) if num_games > 0 else None,
+                'fg_pct': None,  # Not available from Game records
+                'three_pct': None,
+                'ft_pct': None,
+                'rebounds': None,
+                'assists': None,
+                'turnovers': None,
+                'steals': None,
+                'blocks': None,
+                'win_pct': round(win_pct, 4) if win_pct is not None else None
+            }
+        
+        # Get games to determine wins and points_allowed
+        with self.db_manager.get_session() as session:
+            from src.database.models import Game
+            game_ids = [s.game_id for s in stats_history]
+            games = session.query(Game).filter(Game.game_id.in_(game_ids)).all()
+            game_dict = {g.game_id: g for g in games}
+        
+        # Calculate averages from TeamStats
+        total_points = sum(s.points for s in stats_history)
+        total_points_allowed = 0
+        wins = 0
+        
+        for s in stats_history:
+            game = game_dict.get(s.game_id)
+            if game:
+                # Calculate points allowed (opponent's points)
+                if s.is_home:
+                    points_allowed = game.away_score if game.away_score is not None else 0
+                else:
+                    points_allowed = game.home_score if game.home_score is not None else 0
+                total_points_allowed += points_allowed
+                
+                # Determine if team won
+                if game.winner == team_id:
+                    wins += 1
+        
+        total_fg_made = sum(s.field_goals_made for s in stats_history)
+        total_fg_attempted = sum(s.field_goals_attempted for s in stats_history)
+        total_three_made = sum(s.three_pointers_made for s in stats_history)
+        total_three_attempted = sum(s.three_pointers_attempted for s in stats_history)
+        total_ft_made = sum(s.free_throws_made for s in stats_history)
+        total_ft_attempted = sum(s.free_throws_attempted for s in stats_history)
+        total_rebounds = sum(s.rebounds_total for s in stats_history)
+        total_assists = sum(s.assists for s in stats_history)
+        total_turnovers = sum(s.turnovers for s in stats_history)
+        total_steals = sum(s.steals for s in stats_history)
+        total_blocks = sum(s.blocks for s in stats_history)
+        
+        num_games = len(stats_history)
+        
+        # Calculate win percentage
+        win_pct = wins / num_games if num_games > 0 else None
+        
+        return {
+            'points': round(total_points / num_games, 2) if num_games > 0 else None,
+            'points_allowed': round(total_points_allowed / num_games, 2) if num_games > 0 else None,
+            'fg_pct': round(total_fg_made / total_fg_attempted, 4) if total_fg_attempted > 0 else None,
+            'three_pct': round(total_three_made / total_three_attempted, 4) if total_three_attempted > 0 else None,
+            'ft_pct': round(total_ft_made / total_ft_attempted, 4) if total_ft_attempted > 0 else None,
+            'rebounds': round(total_rebounds / num_games, 2) if num_games > 0 else None,
+            'assists': round(total_assists / num_games, 2) if num_games > 0 else None,
+            'turnovers': round(total_turnovers / num_games, 2) if num_games > 0 else None,
+            'steals': round(total_steals / num_games, 2) if num_games > 0 else None,
+            'blocks': round(total_blocks / num_games, 2) if num_games > 0 else None,
+            'win_pct': round(win_pct, 4) if win_pct is not None else None
+        }
+    
     def _calculate_possessions(self, stat: TeamStats) -> float:
         """
         Calculate possessions for a team in a game.

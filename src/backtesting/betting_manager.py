@@ -194,18 +194,53 @@ class BettingManager:
                 # Get bankroll counting only from today (for fresh starts)
                 bankroll = self.get_bankroll(strategy_name, start_date=target_date)
                 
+                # Get existing bets BEFORE placing new ones (to avoid duplicates in summary)
+                existing_bets = self.get_existing_bets_for_date(target_date, strategy_name)
+                existing_game_ids = {bet['game_id'] for bet in existing_bets}  # Track which games already have bets
+                
                 bets_placed = []
                 total_wagered = 0.0
                 
+                # First pass: validate existing bets match current predictions
+                bets_to_remove = []
                 for game in games:
-                    try:
-                        # Check if bet already exists for this game/strategy
+                    prediction = session.query(Prediction).filter(
+                        Prediction.game_id == game.game_id,
+                        Prediction.model_name == model_name
+                    ).first()
+                    
+                    if not prediction:
+                        continue
+                    
+                    if game.game_id in existing_game_ids:
+                        # Validate that existing bet matches current prediction
                         existing_bet = session.query(Bet).filter(
                             Bet.game_id == game.game_id,
                             Bet.strategy_name == strategy_name
                         ).first()
                         
-                        if existing_bet:
+                        if existing_bet and existing_bet.bet_team != prediction.predicted_winner:
+                            # Bet was placed with old prediction, delete it
+                            logger.warning(
+                                f"Existing bet for {game.game_id} ({existing_bet.bet_team}) "
+                                f"doesn't match current prediction ({prediction.predicted_winner}). "
+                                f"Deleting old bet."
+                            )
+                            session.delete(existing_bet)
+                            bets_to_remove.append(game.game_id)
+                
+                # Commit deletions
+                if bets_to_remove:
+                    session.commit()
+                    # Update existing_game_ids and existing_bets
+                    existing_game_ids -= set(bets_to_remove)
+                    existing_bets = [b for b in existing_bets if b['game_id'] not in bets_to_remove]
+                
+                # Second pass: place new bets
+                for game in games:
+                    try:
+                        # Check if bet already exists for this game/strategy
+                        if game.game_id in existing_game_ids:
                             logger.debug(f"Bet already exists for {game.game_id} with {strategy_name}")
                             continue
                         
@@ -308,14 +343,13 @@ class BettingManager:
                 
                 session.commit()
                 
-                # Get existing bets for this strategy/date to include in summary
-                existing_bets = self.get_existing_bets_for_date(target_date, strategy_name)
-                
                 # Calculate total pending bets (new + existing)
+                # existing_bets was already queried before placing new bets, so no duplicates
                 total_pending = total_wagered + sum(b['amount'] for b in existing_bets)
                 
                 # Combine new and existing bets for display
-                all_bets = bets_placed + existing_bets
+                # No duplicates because existing_bets was queried BEFORE new bets were placed
+                all_bets = existing_bets + bets_placed
                 total_all_wagered = total_pending
                 
                 results[strategy_name] = {
