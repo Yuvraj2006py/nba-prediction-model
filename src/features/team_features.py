@@ -578,30 +578,17 @@ class TeamFeatureCalculator:
     def calculate_injury_impact(
         self,
         team_id: str,
-        end_date: Optional[date] = None,
-        use_weighted_importance: bool = True
+        end_date: Optional[date] = None
     ) -> Dict[str, Optional[float]]:
         """
-        Calculate team injury impact with optional player importance weighting.
-        
-        Enhanced version that weights injuries by player importance scores.
-        A star player being out has more impact than a bench player.
+        Calculate team injury impact based on player stats.
         
         Args:
             team_id: Team identifier
             end_date: Cutoff date (to avoid data leakage)
-            use_weighted_importance: If True, weight injuries by player importance
             
         Returns:
-            Dictionary with injury metrics:
-            - players_out: Count of players marked as 'out'
-            - players_questionable: Count of players marked as 'questionable'
-            - injury_severity_score: Traditional count-based severity (0-1)
-            - weighted_injury_score: Sum of (importance * severity) for injured players
-            - weighted_severity_score: Normalized weighted severity (0-1)
-            - key_player_out: Boolean if a top-5 player is out
-            - key_players_out_count: Count of top-5 players who are out
-            - total_importance_out: Sum of importance scores for players out
+            Dictionary with injury metrics
         """
         # Get most recent game before end_date
         games = self.db_manager.get_games(
@@ -610,19 +597,12 @@ class TeamFeatureCalculator:
             limit=1
         )
         
-        empty_result = {
-            'players_out': None,
-            'players_questionable': None,
-            'injury_severity_score': None,
-            'weighted_injury_score': None,
-            'weighted_severity_score': None,
-            'key_player_out': None,
-            'key_players_out_count': None,
-            'total_importance_out': None
-        }
-        
         if not games:
-            return empty_result
+            return {
+                'players_out': None,
+                'players_questionable': None,
+                'injury_severity_score': None
+            }
         
         most_recent_game = games[0]
         
@@ -633,277 +613,27 @@ class TeamFeatureCalculator:
                 team_id=team_id
             ).all()
         
-        if not player_stats:
-            return empty_result
-        
-        # Get injury severity weights from settings
-        settings = get_settings()
-        weight_out = settings.INJURY_WEIGHT_OUT
-        weight_questionable = settings.INJURY_WEIGHT_QUESTIONABLE
-        weight_probable = settings.INJURY_WEIGHT_PROBABLE
-        top_players_count = settings.TOP_PLAYERS_COUNT
-        
-        # Count injuries (basic)
         players_out = 0
         players_questionable = 0
         total_players = len(player_stats)
         
-        # Weighted injury tracking
-        weighted_injury_score = 0.0
-        total_importance_out = 0.0
-        key_player_out = False
-        key_players_out_count = 0
-        
-        # Get player importance calculator if using weighted importance
-        importance_calc = None
-        top_player_ids = set()
-        if use_weighted_importance:
-            from src.features.player_importance import PlayerImportanceCalculator
-            importance_calc = PlayerImportanceCalculator(self.db_manager)
-            
-            # Get top players for this team
-            top_players = importance_calc.get_top_players(
-                team_id, 
-                top_n=top_players_count,
-                end_date=end_date
-            )
-            top_player_ids = {p['player_id'] for p in top_players}
-        
-        # Process each player
         for player in player_stats:
-            injury_status = player.injury_status or 'healthy'
-            
-            # Get severity weight for this status
-            if injury_status == 'out':
-                severity_weight = weight_out
+            if player.injury_status == 'out':
                 players_out += 1
-            elif injury_status == 'questionable':
-                severity_weight = weight_questionable
+            elif player.injury_status == 'questionable':
                 players_questionable += 1
-            elif injury_status == 'probable':
-                severity_weight = weight_probable
-            else:
-                severity_weight = 0.0
-            
-            # Skip healthy players for weighted calculations
-            if severity_weight == 0.0:
-                continue
-            
-            # Get player importance
-            player_importance = 1.0  # Default: equal weight
-            if importance_calc:
-                importance = importance_calc.get_importance_score(
-                    player.player_id,
-                    team_id,
-                    games_back=20,
-                    end_date=end_date
-                )
-                if importance is not None:
-                    player_importance = importance
-            
-            # Accumulate weighted injury score
-            weighted_injury_score += player_importance * severity_weight
-            
-            # Track key player injuries
-            if injury_status == 'out':
-                total_importance_out += player_importance
-                if player.player_id in top_player_ids:
-                    key_player_out = True
-                    key_players_out_count += 1
         
-        # Calculate severity scores
+        # Calculate severity score (0-1, higher = more injured)
         if total_players == 0:
             severity = None
-            weighted_severity = None
         else:
-            # Traditional severity (count-based)
-            severity = (players_out * weight_out + players_questionable * weight_questionable) / total_players
-            
-            # Weighted severity (importance-based)
-            # Normalize by team's total importance
-            if importance_calc:
-                team_total_importance = importance_calc.get_team_total_importance(
-                    team_id, end_date=end_date
-                )
-                if team_total_importance > 0:
-                    weighted_severity = min(1.0, weighted_injury_score / team_total_importance)
-                else:
-                    weighted_severity = weighted_injury_score
-            else:
-                weighted_severity = weighted_injury_score
+            severity = (players_out * 1.0 + players_questionable * 0.5) / total_players
         
         return {
             'players_out': players_out,
             'players_questionable': players_questionable,
-            'injury_severity_score': round(severity, 4) if severity is not None else None,
-            'weighted_injury_score': round(weighted_injury_score, 4) if weighted_injury_score > 0 else 0.0,
-            'weighted_severity_score': round(weighted_severity, 4) if weighted_severity is not None else None,
-            'key_player_out': key_player_out,
-            'key_players_out_count': key_players_out_count,
-            'total_importance_out': round(total_importance_out, 4) if total_importance_out > 0 else 0.0
+            'injury_severity_score': round(severity, 3) if severity is not None else None
         }
-    
-    def calculate_historical_injury_impact(
-        self,
-        team_id: str,
-        end_date: Optional[date] = None,
-        games_back: int = 50
-    ) -> Dict[str, Optional[float]]:
-        """
-        Analyze how team performs when key players are injured vs healthy.
-        
-        This provides historical context about how injuries affect team performance.
-        Compares win rate and point differential when key players are out vs playing.
-        
-        Args:
-            team_id: Team identifier
-            end_date: Cutoff date (to avoid data leakage)
-            games_back: Number of recent games to analyze
-            
-        Returns:
-            Dictionary with historical injury impact:
-            - avg_win_pct_with_key_players: Win % when all key players healthy
-            - avg_win_pct_without_key_players: Win % when key player(s) out
-            - win_pct_delta: Difference (negative = worse without key players)
-            - avg_point_diff_with: Avg point diff when healthy
-            - avg_point_diff_without: Avg point diff when injured
-            - point_diff_delta: Difference in point differential
-            - games_with_key_players: Count of games with healthy key players
-            - games_without_key_players: Count of games with injured key players
-        """
-        from src.features.player_importance import PlayerImportanceCalculator
-        
-        empty_result = {
-            'avg_win_pct_with_key_players': None,
-            'avg_win_pct_without_key_players': None,
-            'win_pct_delta': None,
-            'avg_point_diff_with': None,
-            'avg_point_diff_without': None,
-            'point_diff_delta': None,
-            'games_with_key_players': 0,
-            'games_without_key_players': 0
-        }
-        
-        # Get recent games
-        games = self.db_manager.get_games(
-            team_id=team_id,
-            end_date=end_date,
-            limit=games_back
-        )
-        
-        if not games or len(games) < 10:
-            return empty_result
-        
-        # Get player importance calculator
-        importance_calc = PlayerImportanceCalculator(self.db_manager)
-        
-        # Get top players (key players)
-        settings = get_settings()
-        top_players_count = settings.TOP_PLAYERS_COUNT
-        top_players = importance_calc.get_top_players(
-            team_id,
-            top_n=top_players_count,
-            end_date=end_date
-        )
-        
-        if not top_players:
-            return empty_result
-        
-        top_player_ids = {p['player_id'] for p in top_players}
-        
-        # Analyze each game
-        games_with_key_players = []
-        games_without_key_players = []
-        
-        for game in games:
-            # Get player stats for this game
-            with self.db_manager.get_session() as session:
-                player_stats = session.query(PlayerStats).filter_by(
-                    game_id=game.game_id,
-                    team_id=team_id
-                ).all()
-            
-            # Check if any key player was out
-            key_player_out = False
-            for player in player_stats:
-                if player.player_id in top_player_ids:
-                    if player.injury_status == 'out':
-                        key_player_out = True
-                        break
-                    # Also check minutes - if key player played <5 min, consider them out
-                    if player.minutes_played:
-                        try:
-                            if ':' in str(player.minutes_played):
-                                mins = int(str(player.minutes_played).split(':')[0])
-                                if mins < 5:
-                                    key_player_out = True
-                                    break
-                        except (ValueError, IndexError):
-                            pass
-            
-            # Determine if team won and by how much
-            if game.winner is None:
-                continue  # Skip unfinished games
-            
-            team_won = (game.winner == team_id)
-            
-            # Calculate point differential from team's perspective
-            if game.home_team_id == team_id:
-                point_diff = (game.home_score or 0) - (game.away_score or 0)
-            else:
-                point_diff = (game.away_score or 0) - (game.home_score or 0)
-            
-            game_result = {
-                'won': team_won,
-                'point_diff': point_diff
-            }
-            
-            if key_player_out:
-                games_without_key_players.append(game_result)
-            else:
-                games_with_key_players.append(game_result)
-        
-        # Calculate metrics
-        result = empty_result.copy()
-        result['games_with_key_players'] = len(games_with_key_players)
-        result['games_without_key_players'] = len(games_without_key_players)
-        
-        if games_with_key_players:
-            wins_with = sum(1 for g in games_with_key_players if g['won'])
-            result['avg_win_pct_with_key_players'] = round(
-                wins_with / len(games_with_key_players), 4
-            )
-            result['avg_point_diff_with'] = round(
-                sum(g['point_diff'] for g in games_with_key_players) / len(games_with_key_players), 
-                2
-            )
-        
-        if games_without_key_players:
-            wins_without = sum(1 for g in games_without_key_players if g['won'])
-            result['avg_win_pct_without_key_players'] = round(
-                wins_without / len(games_without_key_players), 4
-            )
-            result['avg_point_diff_without'] = round(
-                sum(g['point_diff'] for g in games_without_key_players) / len(games_without_key_players), 
-                2
-            )
-        
-        # Calculate deltas
-        if result['avg_win_pct_with_key_players'] is not None and \
-           result['avg_win_pct_without_key_players'] is not None:
-            result['win_pct_delta'] = round(
-                result['avg_win_pct_without_key_players'] - result['avg_win_pct_with_key_players'],
-                4
-            )
-        
-        if result['avg_point_diff_with'] is not None and \
-           result['avg_point_diff_without'] is not None:
-            result['point_diff_delta'] = round(
-                result['avg_point_diff_without'] - result['avg_point_diff_with'],
-                2
-            )
-        
-        return result
     
     def calculate_assist_rate(
         self,

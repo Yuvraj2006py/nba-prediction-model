@@ -45,8 +45,7 @@ class FeatureAggregator:
         away_team_id: str,
         end_date: Optional[date] = None,
         games_back: int = None,
-        use_cache: bool = True,
-        include_betting_features: bool = False
+        use_cache: bool = True
     ) -> pd.DataFrame:
         """
         Create feature vector for a game by combining all feature calculators.
@@ -96,9 +95,8 @@ class FeatureAggregator:
         # Contextual features
         features.update(self._calculate_contextual_features(game_id, home_team_id, away_team_id, end_date))
         
-        # Betting features (optional - excluded for pure statistical model)
-        if include_betting_features:
-            features.update(self._calculate_betting_features(game_id, home_team_id, away_team_id))
+        # Betting features
+        features.update(self._calculate_betting_features(game_id, home_team_id, away_team_id))
         
         # Create DataFrame
         feature_df = pd.DataFrame([features])
@@ -175,24 +173,11 @@ class FeatureAggregator:
         features[f'{prefix}win_streak'] = streak.get('win_streak', 0)
         features[f'{prefix}loss_streak'] = streak.get('loss_streak', 0)
         
-        # Injury impact (enhanced with weighted importance)
-        injury = self.team_calc.calculate_injury_impact(
-            team_id, end_date, use_weighted_importance=True
-        )
+        # Injury impact
+        injury = self.team_calc.calculate_injury_impact(team_id, end_date)
         features[f'{prefix}players_out'] = injury.get('players_out')
         features[f'{prefix}players_questionable'] = injury.get('players_questionable')
         features[f'{prefix}injury_severity_score'] = injury.get('injury_severity_score')
-        # New weighted injury features
-        features[f'{prefix}weighted_injury_score'] = injury.get('weighted_injury_score')
-        features[f'{prefix}weighted_severity_score'] = injury.get('weighted_severity_score')
-        features[f'{prefix}key_player_out'] = 1 if injury.get('key_player_out') else 0
-        features[f'{prefix}key_players_out_count'] = injury.get('key_players_out_count')
-        features[f'{prefix}total_importance_out'] = injury.get('total_importance_out')
-        
-        # Historical injury impact (how team performs when key players are out)
-        hist_injury = self.team_calc.calculate_historical_injury_impact(team_id, end_date)
-        features[f'{prefix}injury_win_pct_delta'] = hist_injury.get('win_pct_delta')
-        features[f'{prefix}injury_point_diff_delta'] = hist_injury.get('point_diff_delta')
         
         # Advanced stats
         assist_rate = self.team_calc.calculate_assist_rate(team_id, games_back, end_date)
@@ -203,42 +188,6 @@ class FeatureAggregator:
         
         block_rate = self.team_calc.calculate_block_rate(team_id, games_back, end_date)
         features[f'{prefix}block_rate'] = block_rate
-        
-        # Rolling stats: Last 5 games
-        l5_stats = self.team_calc.calculate_rolling_stats(team_id, 5, end_date)
-        features[f'{prefix}l5_points'] = l5_stats.get('points')
-        features[f'{prefix}l5_points_allowed'] = l5_stats.get('points_allowed')
-        features[f'{prefix}l5_fg_pct'] = l5_stats.get('fg_pct')
-        features[f'{prefix}l5_three_pct'] = l5_stats.get('three_pct')
-        features[f'{prefix}l5_ft_pct'] = l5_stats.get('ft_pct')
-        features[f'{prefix}l5_rebounds'] = l5_stats.get('rebounds')
-        features[f'{prefix}l5_assists'] = l5_stats.get('assists')
-        features[f'{prefix}l5_turnovers'] = l5_stats.get('turnovers')
-        features[f'{prefix}l5_steals'] = l5_stats.get('steals')
-        features[f'{prefix}l5_blocks'] = l5_stats.get('blocks')
-        features[f'{prefix}l5_win_pct'] = l5_stats.get('win_pct')
-        
-        # Rolling stats: Last 10 games
-        l10_stats = self.team_calc.calculate_rolling_stats(team_id, 10, end_date)
-        features[f'{prefix}l10_points'] = l10_stats.get('points')
-        features[f'{prefix}l10_points_allowed'] = l10_stats.get('points_allowed')
-        features[f'{prefix}l10_fg_pct'] = l10_stats.get('fg_pct')
-        features[f'{prefix}l10_three_pct'] = l10_stats.get('three_pct')
-        features[f'{prefix}l10_ft_pct'] = l10_stats.get('ft_pct')
-        features[f'{prefix}l10_rebounds'] = l10_stats.get('rebounds')
-        features[f'{prefix}l10_assists'] = l10_stats.get('assists')
-        features[f'{prefix}l10_turnovers'] = l10_stats.get('turnovers')
-        features[f'{prefix}l10_steals'] = l10_stats.get('steals')
-        features[f'{prefix}l10_blocks'] = l10_stats.get('blocks')
-        features[f'{prefix}l10_win_pct'] = l10_stats.get('win_pct')
-        
-        # Rolling stats: Last 20 games
-        l20_stats = self.team_calc.calculate_rolling_stats(team_id, 20, end_date)
-        features[f'{prefix}l20_points'] = l20_stats.get('points')
-        features[f'{prefix}l20_points_allowed'] = l20_stats.get('points_allowed')
-        features[f'{prefix}l20_fg_pct'] = l20_stats.get('fg_pct')
-        features[f'{prefix}l20_three_pct'] = l20_stats.get('three_pct')
-        features[f'{prefix}l20_win_pct'] = l20_stats.get('win_pct')
         
         return features
     
@@ -279,29 +228,6 @@ class FeatureAggregator:
         features['h2h_home_avg_score'] = h2h_scores.get('team1_avg_score')
         features['h2h_away_avg_score'] = h2h_scores.get('team2_avg_score')
         
-        # Injury advantage comparison
-        home_injury = self.team_calc.calculate_injury_impact(
-            home_team_id, end_date, use_weighted_importance=True
-        )
-        away_injury = self.team_calc.calculate_injury_impact(
-            away_team_id, end_date, use_weighted_importance=True
-        )
-        
-        # Weighted injury advantage (positive = away team more injured, good for home)
-        home_weighted = home_injury.get('weighted_injury_score') or 0
-        away_weighted = away_injury.get('weighted_injury_score') or 0
-        features['injury_advantage'] = away_weighted - home_weighted
-        
-        # Key player advantage
-        home_key_out = home_injury.get('key_players_out_count') or 0
-        away_key_out = away_injury.get('key_players_out_count') or 0
-        features['key_player_advantage'] = away_key_out - home_key_out
-        
-        # Total importance advantage
-        home_importance_out = home_injury.get('total_importance_out') or 0
-        away_importance_out = away_injury.get('total_importance_out') or 0
-        features['importance_advantage'] = away_importance_out - home_importance_out
-        
         return features
     
     def _calculate_contextual_features(
@@ -314,38 +240,18 @@ class FeatureAggregator:
         """Calculate contextual features."""
         features = {}
         
-        # Rest days (using model's expected name: days_rest)
+        # Rest days
         home_rest = self.contextual_calc.calculate_rest_days(home_team_id, end_date)
         away_rest = self.contextual_calc.calculate_rest_days(away_team_id, end_date)
-        features['home_days_rest'] = home_rest if home_rest is not None else 0
-        features['away_days_rest'] = away_rest if away_rest is not None else 0
-        features['home_rest_days'] = home_rest if home_rest is not None else 0  # Keep for compatibility
-        features['away_rest_days'] = away_rest if away_rest is not None else 0  # Keep for compatibility
+        features['home_rest_days'] = home_rest if home_rest is not None else 0
+        features['away_rest_days'] = away_rest if away_rest is not None else 0
         features['rest_days_differential'] = (home_rest - away_rest) if (home_rest and away_rest) else None
         
-        # Back-to-back (using model's expected name: is_back_to_back)
+        # Back-to-back
         home_b2b = self.contextual_calc.is_back_to_back(home_team_id, end_date)
         away_b2b = self.contextual_calc.is_back_to_back(away_team_id, end_date)
-        features['home_is_back_to_back'] = 1 if home_b2b else 0
-        features['away_is_back_to_back'] = 1 if away_b2b else 0
-        features['home_is_b2b'] = 1 if home_b2b else 0  # Keep for compatibility
-        features['away_is_b2b'] = 1 if away_b2b else 0  # Keep for compatibility
-        
-        # Games in last 7 days
-        home_games_7d = self.contextual_calc.calculate_games_in_last_7_days(home_team_id, end_date)
-        away_games_7d = self.contextual_calc.calculate_games_in_last_7_days(away_team_id, end_date)
-        features['home_games_in_last_7_days'] = home_games_7d
-        features['away_games_in_last_7_days'] = away_games_7d
-        
-        # Home/away win percentages
-        home_home_wpct = self.contextual_calc.calculate_home_win_pct(home_team_id, 20, end_date)
-        home_away_wpct = self.contextual_calc.calculate_away_win_pct(home_team_id, 20, end_date)
-        away_home_wpct = self.contextual_calc.calculate_home_win_pct(away_team_id, 20, end_date)
-        away_away_wpct = self.contextual_calc.calculate_away_win_pct(away_team_id, 20, end_date)
-        features['home_home_win_pct'] = home_home_wpct
-        features['home_away_win_pct'] = home_away_wpct
-        features['away_home_win_pct'] = away_home_wpct
-        features['away_away_win_pct'] = away_away_wpct
+        features['home_is_b2b'] = 1 if home_b2b else 0
+        features['away_is_b2b'] = 1 if away_b2b else 0
         
         # Home advantage (always 1 for home team in this context)
         features['is_home_advantage'] = 1
@@ -401,75 +307,49 @@ class FeatureAggregator:
         features: Dict[str, Any]
     ) -> None:
         """
-        Save features to database using batch insert for efficiency.
+        Save features to database.
         
         Args:
             game_id: Game identifier
             features: Dictionary of feature names and values
         """
         try:
-            # Get game once (cache it to avoid multiple queries)
-            game = self.db_manager.get_game(game_id)
-            if not game:
-                logger.warning(f"Game {game_id} not found, cannot save features")
-                return
-            
-            # Prepare all feature data in one batch
-            feature_records = []
-            
             for feature_name, feature_value in features.items():
                 # Determine category
                 if feature_name.startswith('home_') or feature_name.startswith('away_'):
                     category = 'team'
-                    # Extract team_id from feature name
-                    team_id = game.home_team_id if feature_name.startswith('home_') else game.away_team_id
+                    # Extract team_id from feature name if possible
+                    team_id = None
+                    if feature_name.startswith('home_'):
+                        game = self.db_manager.get_game(game_id)
+                        team_id = game.home_team_id if game else None
+                    elif feature_name.startswith('away_'):
+                        game = self.db_manager.get_game(game_id)
+                        team_id = game.away_team_id if game else None
                 elif feature_name.startswith('h2h_') or 'differential' in feature_name:
                     category = 'matchup'
                     team_id = None
-                elif feature_name.startswith('consensus_') or 'moneyline' in feature_name or 'implied' in feature_name or 'movement' in feature_name:
+                elif feature_name.startswith('consensus_') or 'moneyline' in feature_name or 'implied' in feature_name:
                     category = 'betting'
                     team_id = None
                 else:
                     category = 'contextual'
                     team_id = None
                 
-                feature_records.append({
+                feature_data = {
                     'game_id': game_id,
                     'feature_name': feature_name,
                     'feature_value': feature_value if feature_value is not None else None,
                     'feature_category': category,
                     'team_id': team_id
-                })
-            
-            # Batch insert/update in a single session
-            with self.db_manager.get_session() as session:
-                from src.database.models import Feature
+                }
                 
-                for feature_data in feature_records:
-                    # Check if feature exists
-                    feature = session.query(Feature).filter_by(
-                        game_id=feature_data['game_id'],
-                        feature_name=feature_data['feature_name']
-                    ).first()
-                    
-                    if feature:
-                        # Update existing
-                        feature.feature_value = feature_data['feature_value']
-                        feature.feature_category = feature_data['feature_category']
-                        feature.team_id = feature_data['team_id']
-                    else:
-                        # Create new
-                        feature = Feature(**feature_data)
-                        session.add(feature)
-                
-                # Single commit for all features
-                session.commit()
+                self.db_manager.insert_feature(feature_data)
             
             logger.debug(f"Saved {len(features)} features to database for game {game_id}")
             
         except Exception as e:
             logger.error(f"Error saving features to database: {e}")
-            raise  # Re-raise to handle in calling code
     
     def get_features_from_db(
         self,

@@ -28,6 +28,7 @@ warnings.filterwarnings('ignore', category=pd.errors.PerformanceWarning)
 
 import logging
 from datetime import date, datetime, timedelta
+from config.settings import get_settings
 from argparse import ArgumentParser
 
 # Setup logging
@@ -169,10 +170,11 @@ def make_predictions(quiet: bool = False) -> dict:
         
         for game in verified_games:
             try:
+                settings = get_settings()
                 result = prediction_service.predict_game(
                     game_id=game.game_id,
-                    model_name='nba_v2_classifier',
-                    reg_model_name='nba_v2_regressor'
+                    model_name=settings.CLASSIFIER_MODEL_NAME,
+                    reg_model_name=settings.REGRESSOR_MODEL_NAME
                 )
                 
                 if result:
@@ -180,7 +182,8 @@ def make_predictions(quiet: bool = False) -> dict:
                     
                     # Save prediction
                     try:
-                        prediction_service.save_prediction(result, model_name='nba_v2_classifier')
+                        settings = get_settings()
+                        prediction_service.save_prediction(result, model_name=settings.CLASSIFIER_MODEL_NAME)
                         stats['saved'] += 1
                         
                         # Collect prediction details for summary
@@ -381,15 +384,16 @@ def evaluate_predictions(quiet: bool = False) -> dict:
                 Game.game_date == yesterday,
                 Game.home_score.isnot(None),
                 Game.away_score.isnot(None),
-                Prediction.model_name == 'nba_v2_classifier'
+                Prediction.model_name == get_settings().CLASSIFIER_MODEL_NAME
             ).all()
             
             stats['games'] = len(games)
             
             for game in games:
+                settings = get_settings()
                 prediction = session.query(Prediction).filter_by(
                     game_id=game.game_id,
-                    model_name='nba_v2_classifier'
+                    model_name=settings.CLASSIFIER_MODEL_NAME
                 ).first()
                 
                 if not prediction:
@@ -478,7 +482,7 @@ def place_bets(quiet: bool = False, strategies: list = None) -> dict:
         result = betting_manager.place_bets_for_date(
             target_date=today,
             strategy_names=strategies,
-            model_name='nba_v2_classifier'
+            model_name=get_settings().CLASSIFIER_MODEL_NAME
         )
         
         if result['status'] == 'complete':

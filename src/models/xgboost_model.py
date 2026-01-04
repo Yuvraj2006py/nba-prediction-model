@@ -47,16 +47,17 @@ class XGBoostModel(BaseModel):
         self.random_state = random_state
         
         # Default XGBoost parameters
+        # Updated with stronger regularization to prevent overfitting to streak features
         default_params = {
             'n_estimators': 100,
-            'max_depth': 6,
-            'learning_rate': 0.1,
+            'max_depth': 4,              # Reduced from 6 - simpler trees prevent overfitting
+            'learning_rate': 0.05,       # Lower learning rate for more stable training
             'subsample': 0.8,
             'colsample_bytree': 0.8,
-            'min_child_weight': 1,
-            'gamma': 0,
-            'reg_alpha': 0,
-            'reg_lambda': 1,
+            'min_child_weight': 3,       # Increased from 1 - require more samples per leaf
+            'gamma': 0.1,                # Minimum loss reduction for splits (prevents overfitting)
+            'reg_alpha': 0.5,            # L1 regularization (was 0)
+            'reg_lambda': 2.0,           # L2 regularization (was 1) - stronger penalty
             'random_state': random_state,
             'n_jobs': -1,
             'verbosity': 0

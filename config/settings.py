@@ -40,6 +40,10 @@ class Settings:
     MODEL_SAVE_PATH: str = os.getenv("MODEL_SAVE_PATH", str(MODELS_DIR))
     FEATURE_CACHE_PATH: str = os.getenv("FEATURE_CACHE_PATH", str(PROCESSED_DATA_DIR / "features"))
     
+    # Active Model Names (can be overridden via environment variables)
+    CLASSIFIER_MODEL_NAME: str = os.getenv("CLASSIFIER_MODEL_NAME", "nba_v2_classifier")
+    REGRESSOR_MODEL_NAME: str = os.getenv("REGRESSOR_MODEL_NAME", "nba_v2_regressor")
+    
     # Logging Configuration
     LOG_LEVEL: str = os.getenv("LOG_LEVEL", "INFO")
     LOG_FILE_PATH: str = os.getenv("LOG_FILE_PATH", str(LOGS_DIR / "nba_predictions.log"))
@@ -93,23 +97,6 @@ class Settings:
     # Backtesting Configuration
     COMMISSION_RATE: float = float(os.getenv("COMMISSION_RATE", "0.0"))  # Betting commission
     TRANSACTION_COST: float = float(os.getenv("TRANSACTION_COST", "0.0"))  # Per-bet cost
-    
-    # RapidAPI Configuration (for injury data)
-    RAPIDAPI_NBA_INJURIES_KEY: Optional[str] = os.getenv("RAPIDAPI_NBA_INJURIES_KEY")
-    RAPIDAPI_NBA_INJURIES_HOST: str = os.getenv(
-        "RAPIDAPI_NBA_INJURIES_HOST", 
-        "nba-injuries-reports.p.rapidapi.com"
-    )
-    
-    # Player Importance Configuration
-    PLAYER_IMPORTANCE_GAMES_BACK: int = int(os.getenv("PLAYER_IMPORTANCE_GAMES_BACK", "20"))
-    TOP_PLAYERS_COUNT: int = int(os.getenv("TOP_PLAYERS_COUNT", "5"))  # Number of "key players"
-    
-    # Injury Severity Weights
-    INJURY_WEIGHT_OUT: float = float(os.getenv("INJURY_WEIGHT_OUT", "1.0"))
-    INJURY_WEIGHT_QUESTIONABLE: float = float(os.getenv("INJURY_WEIGHT_QUESTIONABLE", "0.5"))
-    INJURY_WEIGHT_PROBABLE: float = float(os.getenv("INJURY_WEIGHT_PROBABLE", "0.25"))
-    INJURY_WEIGHT_HEALTHY: float = float(os.getenv("INJURY_WEIGHT_HEALTHY", "0.0"))
     
     @classmethod
     def create_directories(cls):

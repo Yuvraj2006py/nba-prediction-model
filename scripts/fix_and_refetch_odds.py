@@ -65,3 +65,4 @@ if __name__ == '__main__':
     today = date.today()
     fix_odds_for_date(today)
 
+

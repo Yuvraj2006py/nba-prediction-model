@@ -1,0 +1,642 @@
+[
+  {
+    "date": "2026-01-04",
+    "team": "Detroit Pistons",
+    "player": "Jalen Duren",
+    "status": "Out",
+    "reason": "Injury/Illness - Right Ankle; Sprain",
+    "reportTime": "02PM"
+  },
+  {
+    "date": "2026-01-04",
+    "team": "Detroit Pistons",
+    "player": "Tobias Harris",
+    "status": "Out",
+    "reason": "Injury/Illness - Left Hip; Sprain",
+    "reportTime": "02PM"
+  },
+  {
+    "date": "2026-01-04",
+    "team": "Detroit Pistons",
+    "player": "Isaac Jones",
+    "status": "Out",
+    "reason": "G League - On Assignment",
+    "reportTime": "02PM"
+  },
+  {
+    "date": "2026-01-04",
+    "team": "Detroit Pistons",
+    "player": "Bobi Klintman",
+    "status": "Out",
+    "reason": "G League - On Assignment",
+    "reportTime": "02PM"
+  },
+  {
+    "date": "2026-01-04",
+    "team": "Detroit Pistons",
+    "player": "Caris LeVert",
+    "status": "Out",
+    "reason": "Injury/Illness - Left Knee; Tendinopathy",
+    "reportTime": "02PM"
+  },
+  {
+    "date": "2026-01-04",
+    "team": "Detroit Pistons",
+    "player": "Wendell Moore Jr.",
+    "status": "Out",
+    "reason": "G League - Two- Way",
+    "reportTime": "02PM"
+  },
+  {
+    "date": "2026-01-04",
+    "team": "Cleveland Cavaliers",
+    "player": "Jarrett Allen",
+    "status": "Questionable",
+    "reason": "Injury/Illness - Illness; Illness",
+    "reportTime": "02PM"
+  },
+  {
+    "date": "2026-01-04",
+    "team": "Cleveland Cavaliers",
+    "player": "Chris Livingston",
+    "status": "Out",
+    "reason": "G League - Two- Way",
+    "reportTime": "02PM"
+  },
+  {
+    "date": "2026-01-04",
+    "team": "Cleveland Cavaliers",
+    "player": "Sam Merrill",
+    "status": "Questionable",
+    "reason": "Injury/Illness - Left Ankle; Sprain",
+    "reportTime": "02PM"
+  },
+  {
+    "date": "2026-01-04",
+    "team": "Cleveland Cavaliers",
+    "player": "Larry Nance Jr.",
+    "status": "Out",
+    "reason": "Injury/Illness - Right Calf; Strain",
+    "reportTime": "02PM"
+  },
+  {
+    "date": "2026-01-04",
+    "team": "Cleveland Cavaliers",
+    "player": "Max Strus",
+    "status": "Out",
+    "reason": "Injury/Illness - Left Foot; Surgery - Jones Fracture",
+    "reportTime": "02PM"
+  },
+  {
+    "date": "2026-01-04",
+    "team": "Cleveland Cavaliers",
+    "player": "Luke Travers",
+    "status": "Out",
+    "reason": "G League - Two- Way",
+    "reportTime": "02PM"
+  },
+  {
+    "date": "2026-01-04",
+    "team": "Cleveland Cavaliers",
+    "player": "Dean Wade",
+    "status": "Questionable",
+    "reason": "Injury/Illness - Left Knee; Contusion",
+    "reportTime": "02PM"
+  },
+  {
+    "date": "2026-01-04",
+    "team": "Indiana Pacers",
+    "player": "Tyrese Haliburton",
+    "status": "Out",
+    "reason": "Injury/Illness - Right Achilles Tendon; Tear",
+    "reportTime": "02PM"
+  },
+  {
+    "date": "2026-01-04",
+    "team": "Indiana Pacers",
+    "player": "Isaiah Jackson",
+    "status": "Out",
+    "reason": "Injury/Illness - N/a; Concussion",
+    "reportTime": "02PM"
+  },
+  {
+    "date": "2026-01-04",
+    "team": "Indiana Pacers",
+    "player": "Bennedict Mathurin",
+    "status": "Out",
+    "reason": "Injury/Illness - Right Thumb; Sprain Injury Report: 01/04/26",
+    "reportTime": "02PM"
+  },
+  {
+    "date": "2026-01-04",
+    "team": "Indiana Pacers",
+    "player": "Obi Toppin",
+    "status": "Out",
+    "reason": "Injury/Illness - Right Foot; Stress Fracture",
+    "reportTime": "02PM"
+  },
+  {
+    "date": "2026-01-04",
+    "team": "Orlando Magic",
+    "player": "Colin Castleton",
+    "status": "Out",
+    "reason": "G League - Two- Way",
+    "reportTime": "02PM"
+  },
+  {
+    "date": "2026-01-04",
+    "team": "Orlando Magic",
+    "player": "Jalen Suggs",
+    "status": "Out",
+    "reason": "Injury/Illness - Right Knee; Grade 1 MCL Contusion",
+    "reportTime": "02PM"
+  },
+  {
+    "date": "2026-01-04",
+    "team": "Orlando Magic",
+    "player": "Franz Wagner",
+    "status": "Out",
+    "reason": "Injury/Illness - Left High Ankle; Sprain",
+    "reportTime": "02PM"
+  },
+  {
+    "date": "2026-01-04",
+    "team": "Orlando Magic",
+    "player": "Moritz Wagner",
+    "status": "Out",
+    "reason": "Injury/Illness - Left Knee; Injury Recovery",
+    "reportTime": "02PM"
+  },
+  {
+    "date": "2026-01-04",
+    "team": "Denver Nuggets",
+    "player": "Tamar Bates",
+    "status": "Out",
+    "reason": "Injury/Illness - Left Foot; Surgery",
+    "reportTime": "02PM"
+  },
+  {
+    "date": "2026-01-04",
+    "team": "Denver Nuggets",
+    "player": "Christian Braun",
+    "status": "Questionable",
+    "reason": "Injury/Illness - Left Ankle; Sprain",
+    "reportTime": "02PM"
+  },
+  {
+    "date": "2026-01-04",
+    "team": "Denver Nuggets",
+    "player": "Aaron Gordon",
+    "status": "Questionable",
+    "reason": "Injury/Illness - Right Hamstring; Strain",
+    "reportTime": "02PM"
+  },
+  {
+    "date": "2026-01-04",
+    "team": "Denver Nuggets",
+    "player": "Cameron Johnson",
+    "status": "Out",
+    "reason": "Injury/Illness - Right Knee; Bone Bruise",
+    "reportTime": "02PM"
+  },
+  {
+    "date": "2026-01-04",
+    "team": "Denver Nuggets",
+    "player": "Nikola Jokic",
+    "status": "Out",
+    "reason": "Injury/Illness - Left Knee; Bone Bruise",
+    "reportTime": "02PM"
+  },
+  {
+    "date": "2026-01-04",
+    "team": "Denver Nuggets",
+    "player": "Jamal Murray",
+    "status": "Probable",
+    "reason": "Injury/Illness - Left Ankle; Sprain",
+    "reportTime": "02PM"
+  },
+  {
+    "date": "2026-01-04",
+    "team": "Denver Nuggets",
+    "player": "Jonas Valanciunas",
+    "status": "Out",
+    "reason": "Injury/Illness - Right Calf; Strain",
+    "reportTime": "02PM"
+  },
+  {
+    "date": "2026-01-04",
+    "team": "Brooklyn Nets",
+    "player": "Nic Claxton",
+    "status": "Out",
+    "reason": "Personal Reasons",
+    "reportTime": "02PM"
+  },
+  {
+    "date": "2026-01-04",
+    "team": "Brooklyn Nets",
+    "player": "Tyson Etienne",
+    "status": "Out",
+    "reason": "G League - Two- Way",
+    "reportTime": "02PM"
+  },
+  {
+    "date": "2026-01-04",
+    "team": "Brooklyn Nets",
+    "player": "Haywood Highsmith",
+    "status": "Out",
+    "reason": "Injury/Illness - Right Knee; Injury Recovery",
+    "reportTime": "02PM"
+  },
+  {
+    "date": "2026-01-04",
+    "team": "Brooklyn Nets",
+    "player": "Chaney Johnson",
+    "status": "Out",
+    "reason": "G League - Two- Way Injury Report: 01/04/26",
+    "reportTime": "02PM"
+  },
+  {
+    "date": "2026-01-04",
+    "team": "Brooklyn Nets",
+    "player": "E.J. Liddell",
+    "status": "Out",
+    "reason": "G League - Two- Way",
+    "reportTime": "02PM"
+  },
+  {
+    "date": "2026-01-04",
+    "team": "Brooklyn Nets",
+    "player": "Michael Porter Jr.",
+    "status": "Probable",
+    "reason": "Injury/Illness - N/a; Illness",
+    "reportTime": "02PM"
+  },
+  {
+    "date": "2026-01-04",
+    "team": "Brooklyn Nets",
+    "player": "Ben Saraf",
+    "status": "Out",
+    "reason": "G League - On Assignment",
+    "reportTime": "02PM"
+  },
+  {
+    "date": "2026-01-04",
+    "team": "Washington Wizards",
+    "player": "Kyshawn George",
+    "status": "Out",
+    "reason": "Injury/Illness - Left Hip Flexor; Strain",
+    "reportTime": "02PM"
+  },
+  {
+    "date": "2026-01-04",
+    "team": "Washington Wizards",
+    "player": "Tristan Vukcevic",
+    "status": "Questionable",
+    "reason": "Injury/Illness - N/a; Illness",
+    "reportTime": "02PM"
+  },
+  {
+    "date": "2026-01-04",
+    "team": "Washington Wizards",
+    "player": "Cam Whitmore",
+    "status": "Out",
+    "reason": "Injury/Illness - Right Shoulder; Deep Vein Thrombosis",
+    "reportTime": "02PM"
+  },
+  {
+    "date": "2026-01-04",
+    "team": "New Orleans Pelicans",
+    "player": "Saddiq Bey",
+    "status": "Out",
+    "reason": "Injury/Illness - Right Hip Flexor; Strain",
+    "reportTime": "02PM"
+  },
+  {
+    "date": "2026-01-04",
+    "team": "New Orleans Pelicans",
+    "player": "Hunter Dickinson",
+    "status": "Out",
+    "reason": "G League - Two- Way",
+    "reportTime": "02PM"
+  },
+  {
+    "date": "2026-01-04",
+    "team": "New Orleans Pelicans",
+    "player": "Herbert Jones",
+    "status": "Out",
+    "reason": "Injury/Illness - Right Ankle; Sprain",
+    "reportTime": "02PM"
+  },
+  {
+    "date": "2026-01-04",
+    "team": "New Orleans Pelicans",
+    "player": "Trey Murphy III",
+    "status": "Questionable",
+    "reason": "Injury/Illness - Low Back; Spasms",
+    "reportTime": "02PM"
+  },
+  {
+    "date": "2026-01-04",
+    "team": "New Orleans Pelicans",
+    "player": "Dejounte Murray",
+    "status": "Out",
+    "reason": "Injury/Illness - Right Achilles; Rupture",
+    "reportTime": "02PM"
+  },
+  {
+    "date": "2026-01-04",
+    "team": "New Orleans Pelicans",
+    "player": "Derik Queen",
+    "status": "Questionable",
+    "reason": "Injury/Illness - Left Quad; Contusion",
+    "reportTime": "02PM"
+  },
+  {
+    "date": "2026-01-04",
+    "team": "Oklahoma City Thunder",
+    "player": "Ousmane Dieng",
+    "status": "Out",
+    "reason": "Injury/Illness - Right Calf; Strain",
+    "reportTime": "02PM"
+  },
+  {
+    "date": "2026-01-04",
+    "team": "Oklahoma City Thunder",
+    "player": "Isaiah Hartenstein",
+    "status": "Out",
+    "reason": "Injury/Illness - Right Soleus; Strain",
+    "reportTime": "02PM"
+  },
+  {
+    "date": "2026-01-04",
+    "team": "Oklahoma City Thunder",
+    "player": "Isaiah Joe",
+    "status": "Questionable",
+    "reason": "Injury/Illness - Left Knee; Soreness",
+    "reportTime": "02PM"
+  },
+  {
+    "date": "2026-01-04",
+    "team": "Oklahoma City Thunder",
+    "player": "Thomas Sorber",
+    "status": "Out",
+    "reason": "Injury/Illness - Right ACL; Surgical Recovery Injury Report: 01/04/26",
+    "reportTime": "02PM"
+  },
+  {
+    "date": "2026-01-04",
+    "team": "Oklahoma City Thunder",
+    "player": "Nikola Topic",
+    "status": "Out",
+    "reason": "Injury/Illness - N/a; Surgical recovery",
+    "reportTime": "02PM"
+  },
+  {
+    "date": "2026-01-04",
+    "team": "Oklahoma City Thunder",
+    "player": "Cason Wallace",
+    "status": "Questionable",
+    "reason": "Injury/Illness - Right Knee; Soreness",
+    "reportTime": "02PM"
+  },
+  {
+    "date": "2026-01-04",
+    "team": "Oklahoma City Thunder",
+    "player": "Jaylin Williams",
+    "status": "Out",
+    "reason": "Injury/Illness - Right Heel; Bursitis",
+    "reportTime": "02PM"
+  },
+  {
+    "date": "2026-01-04",
+    "team": "Phoenix Suns",
+    "player": "Grayson Allen",
+    "status": "Questionable",
+    "reason": "Injury/Illness - Right Knee; Injury management",
+    "reportTime": "02PM"
+  },
+  {
+    "date": "2026-01-04",
+    "team": "Phoenix Suns",
+    "player": "Jordan Goodwin",
+    "status": "Available",
+    "reason": "Injury/Illness - Jaw; Sprain",
+    "reportTime": "02PM"
+  },
+  {
+    "date": "2026-01-04",
+    "team": "Phoenix Suns",
+    "player": "Jalen Green",
+    "status": "Out",
+    "reason": "Injury/Illness - Right Hamstring; Strain",
+    "reportTime": "02PM"
+  },
+  {
+    "date": "2026-01-04",
+    "team": "Milwaukee Bucks",
+    "player": "Alex Antetokounmpo",
+    "status": "Out",
+    "reason": "G League - Two- Way",
+    "reportTime": "02PM"
+  },
+  {
+    "date": "2026-01-04",
+    "team": "Milwaukee Bucks",
+    "player": "Giannis Antetokounmpo",
+    "status": "Probable",
+    "reason": "Injury/Illness - Right Calf; Injury Management",
+    "reportTime": "02PM"
+  },
+  {
+    "date": "2026-01-04",
+    "team": "Milwaukee Bucks",
+    "player": "Gary Harris",
+    "status": "Questionable",
+    "reason": "Injury/Illness - Neck; Strain",
+    "reportTime": "02PM"
+  },
+  {
+    "date": "2026-01-04",
+    "team": "Milwaukee Bucks",
+    "player": "Pete Nance",
+    "status": "Out",
+    "reason": "G League - Two- Way",
+    "reportTime": "02PM"
+  },
+  {
+    "date": "2026-01-04",
+    "team": "Milwaukee Bucks",
+    "player": "Taurean Prince",
+    "status": "Out",
+    "reason": "Injury/Illness - Neck; Surgery",
+    "reportTime": "02PM"
+  },
+  {
+    "date": "2026-01-04",
+    "team": "Milwaukee Bucks",
+    "player": "Mark Sears",
+    "status": "Out",
+    "reason": "G League - Two- Way",
+    "reportTime": "02PM"
+  },
+  {
+    "date": "2026-01-04",
+    "team": "Sacramento Kings",
+    "player": "Dylan Cardwell",
+    "status": "Out",
+    "reason": "G League - Two- Way",
+    "reportTime": "02PM"
+  },
+  {
+    "date": "2026-01-04",
+    "team": "Sacramento Kings",
+    "player": "Zach LaVine",
+    "status": "Questionable",
+    "reason": "Injury/Illness - Left Ankle; Sprain",
+    "reportTime": "02PM"
+  },
+  {
+    "date": "2026-01-04",
+    "team": "Sacramento Kings",
+    "player": "Daeqwon Plowden",
+    "status": "Out",
+    "reason": "G League - Two- Way",
+    "reportTime": "02PM"
+  },
+  {
+    "date": "2026-01-04",
+    "team": "Sacramento Kings",
+    "player": "Domantas Sabonis",
+    "status": "Out",
+    "reason": "Injury/Illness - Left Knee; Partial Meniscus Tear",
+    "reportTime": "02PM"
+  },
+  {
+    "date": "2026-01-04",
+    "team": "Sacramento Kings",
+    "player": "Isaiah Stevens",
+    "status": "Out",
+    "reason": "G League - Two- Way Injury Report: 01/04/26",
+    "reportTime": "02PM"
+  },
+  {
+    "date": "2026-01-04",
+    "team": "Memphis Grizzlies",
+    "player": "Santi Aldama",
+    "status": "Questionable",
+    "reason": "Injury/Illness - Right Ankle; Soreness",
+    "reportTime": "02PM"
+  },
+  {
+    "date": "2026-01-04",
+    "team": "Memphis Grizzlies",
+    "player": "Brandon Clarke",
+    "status": "Out",
+    "reason": "Injury/Illness - Right Calf; Strain",
+    "reportTime": "02PM"
+  },
+  {
+    "date": "2026-01-04",
+    "team": "Memphis Grizzlies",
+    "player": "Zach Edey",
+    "status": "Out",
+    "reason": "Injury/Illness - Left Ankle; Stress Reaction",
+    "reportTime": "02PM"
+  },
+  {
+    "date": "2026-01-04",
+    "team": "Memphis Grizzlies",
+    "player": "Ty Jerome",
+    "status": "Out",
+    "reason": "Injury/Illness - Right Calf; Strain",
+    "reportTime": "02PM"
+  },
+  {
+    "date": "2026-01-04",
+    "team": "Memphis Grizzlies",
+    "player": "John Konchar",
+    "status": "Out",
+    "reason": "Injury/Illness - Left Thumb; UCL Surgery Recovery",
+    "reportTime": "02PM"
+  },
+  {
+    "date": "2026-01-04",
+    "team": "Memphis Grizzlies",
+    "player": "Jahmai Mashack",
+    "status": "Out",
+    "reason": "G League - Two- Way",
+    "reportTime": "02PM"
+  },
+  {
+    "date": "2026-01-04",
+    "team": "Memphis Grizzlies",
+    "player": "Ja Morant",
+    "status": "Questionable",
+    "reason": "Injury/Illness - Right Calf; Contusion",
+    "reportTime": "02PM"
+  },
+  {
+    "date": "2026-01-04",
+    "team": "Memphis Grizzlies",
+    "player": "Scotty Pippen Jr.",
+    "status": "Out",
+    "reason": "Injury/Illness - Left Great Toe; Surgery Recovery",
+    "reportTime": "02PM"
+  },
+  {
+    "date": "2026-01-04",
+    "team": "Memphis Grizzlies",
+    "player": "Olivier- Prosper",
+    "status": "Maxence",
+    "reason": "",
+    "reportTime": "02PM"
+  },
+  {
+    "date": "2026-01-04",
+    "team": "Memphis Grizzlies",
+    "player": "Javon Small",
+    "status": "Questionable",
+    "reason": "G League - Two- Way",
+    "reportTime": "02PM"
+  },
+  {
+    "date": "2026-01-04",
+    "team": "Memphis Grizzlies",
+    "player": "Vince Williams Jr.",
+    "status": "Out",
+    "reason": "Injury/Illness - Left Patellar; Tendinitis Los Angeles Lakers",
+    "reportTime": "02PM"
+  },
+  {
+    "date": "2026-01-04",
+    "team": "Memphis Grizzlies",
+    "player": "Rui Hachimura",
+    "status": "Out",
+    "reason": "Injury/Illness - Right Calf; Strain",
+    "reportTime": "02PM"
+  },
+  {
+    "date": "2026-01-04",
+    "team": "Memphis Grizzlies",
+    "player": "Austin Reaves",
+    "status": "Out",
+    "reason": "Injury/Illness - Left Calf; Strain",
+    "reportTime": "02PM"
+  },
+  {
+    "date": "2026-01-04",
+    "team": "Memphis Grizzlies",
+    "player": "Adou Thiero",
+    "status": "Out",
+    "reason": "Injury/Illness - Right MCL; Sprain",
+    "reportTime": "02PM"
+  },
+  {
+    "date": "2026-01-04",
+    "team": "Memphis Grizzlies",
+    "player": "Gabe Vincent",
+    "status": "Out",
+    "reason": "Injury/Illness - Lumbar Back; Strain",
+    "reportTime": "02PM"
+  }
+]

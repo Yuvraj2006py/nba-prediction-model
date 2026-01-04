@@ -26,3 +26,4 @@ if not data['X'].empty:
     print(f"Last 20 features: {list(data['X'].columns[-20:])}")
 
 
+
