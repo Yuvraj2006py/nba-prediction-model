@@ -70,9 +70,46 @@ class Settings:
     DEFAULT_GAMES_BACK: int = int(os.getenv("DEFAULT_GAMES_BACK", "10"))
     FEATURE_CACHE_ENABLED: bool = os.getenv("FEATURE_CACHE_ENABLED", "True").lower() == "true"
     
+    # Exponential Decay Weighting for Rolling Statistics
+    # λ (lambda) controls how fast old games lose influence
+    # Formula: weight_i = e^(-λ * games_ago_i)
+    #   - games_ago_i = 0 for most recent game, 1 for previous, etc.
+    #   - Higher λ = more emphasis on recent games (faster decay)
+    #   - Lower λ = more balanced weighting (slower decay)
+    # 
+    # Weight distribution at λ = 0.1 (default):
+    #   - 5-game window: game 1 = 24.2%, game 5 = 16.2%
+    #   - 10-game window: games 1-5 = 60.1%, games 6-10 = 39.9%
+    #   - 20-game window: games 1-5 = 60.1%, games 6-10 = 24.8%, games 11-20 = 15.1%
+    #
+    # Recommended values:
+    #   - 0.05: Gentle decay (20 games ago still has ~37% weight of most recent)
+    #   - 0.10: Moderate decay [DEFAULT]
+    #   - 0.15: Aggressive decay (20 games ago has ~5% weight)
+    #   - 0.20: Very aggressive (20 games ago has ~2% weight)
+    #   - 0.00: No decay (simple average, backward compatible)
+    ROLLING_STATS_DECAY_RATE: float = float(os.getenv("ROLLING_STATS_DECAY_RATE", "0.1"))
+    
     # Backtesting Configuration
     COMMISSION_RATE: float = float(os.getenv("COMMISSION_RATE", "0.0"))  # Betting commission
     TRANSACTION_COST: float = float(os.getenv("TRANSACTION_COST", "0.0"))  # Per-bet cost
+    
+    # RapidAPI Configuration (for injury data)
+    RAPIDAPI_NBA_INJURIES_KEY: Optional[str] = os.getenv("RAPIDAPI_NBA_INJURIES_KEY")
+    RAPIDAPI_NBA_INJURIES_HOST: str = os.getenv(
+        "RAPIDAPI_NBA_INJURIES_HOST", 
+        "nba-injuries-reports.p.rapidapi.com"
+    )
+    
+    # Player Importance Configuration
+    PLAYER_IMPORTANCE_GAMES_BACK: int = int(os.getenv("PLAYER_IMPORTANCE_GAMES_BACK", "20"))
+    TOP_PLAYERS_COUNT: int = int(os.getenv("TOP_PLAYERS_COUNT", "5"))  # Number of "key players"
+    
+    # Injury Severity Weights
+    INJURY_WEIGHT_OUT: float = float(os.getenv("INJURY_WEIGHT_OUT", "1.0"))
+    INJURY_WEIGHT_QUESTIONABLE: float = float(os.getenv("INJURY_WEIGHT_QUESTIONABLE", "0.5"))
+    INJURY_WEIGHT_PROBABLE: float = float(os.getenv("INJURY_WEIGHT_PROBABLE", "0.25"))
+    INJURY_WEIGHT_HEALTHY: float = float(os.getenv("INJURY_WEIGHT_HEALTHY", "0.0"))
     
     @classmethod
     def create_directories(cls):

@@ -175,11 +175,24 @@ class FeatureAggregator:
         features[f'{prefix}win_streak'] = streak.get('win_streak', 0)
         features[f'{prefix}loss_streak'] = streak.get('loss_streak', 0)
         
-        # Injury impact
-        injury = self.team_calc.calculate_injury_impact(team_id, end_date)
+        # Injury impact (enhanced with weighted importance)
+        injury = self.team_calc.calculate_injury_impact(
+            team_id, end_date, use_weighted_importance=True
+        )
         features[f'{prefix}players_out'] = injury.get('players_out')
         features[f'{prefix}players_questionable'] = injury.get('players_questionable')
         features[f'{prefix}injury_severity_score'] = injury.get('injury_severity_score')
+        # New weighted injury features
+        features[f'{prefix}weighted_injury_score'] = injury.get('weighted_injury_score')
+        features[f'{prefix}weighted_severity_score'] = injury.get('weighted_severity_score')
+        features[f'{prefix}key_player_out'] = 1 if injury.get('key_player_out') else 0
+        features[f'{prefix}key_players_out_count'] = injury.get('key_players_out_count')
+        features[f'{prefix}total_importance_out'] = injury.get('total_importance_out')
+        
+        # Historical injury impact (how team performs when key players are out)
+        hist_injury = self.team_calc.calculate_historical_injury_impact(team_id, end_date)
+        features[f'{prefix}injury_win_pct_delta'] = hist_injury.get('win_pct_delta')
+        features[f'{prefix}injury_point_diff_delta'] = hist_injury.get('point_diff_delta')
         
         # Advanced stats
         assist_rate = self.team_calc.calculate_assist_rate(team_id, games_back, end_date)
@@ -265,6 +278,29 @@ class FeatureAggregator:
         h2h_scores = self.matchup_calc.get_avg_score_h2h(home_team_id, away_team_id, 5, end_date)
         features['h2h_home_avg_score'] = h2h_scores.get('team1_avg_score')
         features['h2h_away_avg_score'] = h2h_scores.get('team2_avg_score')
+        
+        # Injury advantage comparison
+        home_injury = self.team_calc.calculate_injury_impact(
+            home_team_id, end_date, use_weighted_importance=True
+        )
+        away_injury = self.team_calc.calculate_injury_impact(
+            away_team_id, end_date, use_weighted_importance=True
+        )
+        
+        # Weighted injury advantage (positive = away team more injured, good for home)
+        home_weighted = home_injury.get('weighted_injury_score') or 0
+        away_weighted = away_injury.get('weighted_injury_score') or 0
+        features['injury_advantage'] = away_weighted - home_weighted
+        
+        # Key player advantage
+        home_key_out = home_injury.get('key_players_out_count') or 0
+        away_key_out = away_injury.get('key_players_out_count') or 0
+        features['key_player_advantage'] = away_key_out - home_key_out
+        
+        # Total importance advantage
+        home_importance_out = home_injury.get('total_importance_out') or 0
+        away_importance_out = away_injury.get('total_importance_out') or 0
+        features['importance_advantage'] = away_importance_out - home_importance_out
         
         return features
     

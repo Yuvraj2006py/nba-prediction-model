@@ -227,7 +227,10 @@ class FeatureTransformer:
             return []
         
         # Get team stats (only for finished games)
-        team_game_stats = team_stats_df[team_stats_df['team_id'] == team_id].copy()
+        if team_stats_df.empty or 'team_id' not in team_stats_df.columns:
+            team_game_stats = pd.DataFrame()
+        else:
+            team_game_stats = team_stats_df[team_stats_df['team_id'] == team_id].copy()
         
         # Merge with game dates
         if not team_game_stats.empty:
@@ -267,15 +270,58 @@ class FeatureTransformer:
             if not team_game_stats.empty:
                 past_games = team_game_stats[team_game_stats['game_date'] < game_date]
             else:
-                past_games = pd.DataFrame()
+                # Fallback: Use Game records when TeamStats is not available
+                # Filter for finished games before this game date
+                past_games_df = team_games[
+                    (team_games['game_date'] < game_date) &
+                    (team_games['game_status'] == 'finished') &
+                    (team_games['home_score'].notna()) &
+                    (team_games['away_score'].notna())
+                ].copy()
+                
+                if not past_games_df.empty:
+                    # Build a DataFrame similar to team_game_stats structure
+                    past_games_list = []
+                    for _, row in past_games_df.iterrows():
+                        is_home_game = (row['home_team_id'] == team_id)
+                        points = row['home_score'] if is_home_game else row['away_score']
+                        points_allowed = row['away_score'] if is_home_game else row['home_score']
+                        won = 1 if row['winner'] == team_id else 0
+                        
+                        past_games_list.append({
+                            'game_id': row['game_id'],
+                            'game_date': row['game_date'],
+                            'is_home': is_home_game,
+                            'points': points,
+                            'points_allowed': points_allowed,
+                            'won': won,
+                            # For Game records, we don't have detailed stats, so set them to None
+                            'field_goal_percentage': None,
+                            'three_point_percentage': None,
+                            'free_throw_percentage': None,
+                            'rebounds_total': None,
+                            'assists': None,
+                            'turnovers': None,
+                            'steals': None,
+                            'blocks': None,
+                        })
+                    
+                    past_games = pd.DataFrame(past_games_list)
+                else:
+                    past_games = pd.DataFrame()
             
             if past_games.empty:
                 # First game of season - use minimal features
+                logger.debug(f"No past games for {team_id} before {game_date}, using minimal features")
                 features = self._create_minimal_features(game_id, team_id, is_home, game_date)
             else:
+                logger.debug(f"Computing rolling averages for {team_id} game {game_id} with {len(past_games)} past games")
                 features = self._compute_rolling_averages(
                     game_id, team_id, is_home, game_date, past_games
                 )
+                # Debug: Check if features were calculated
+                if features.get('l5_points') is None and len(past_games) > 0:
+                    logger.warning(f"l5_points is None for {team_id} game {game_id} despite {len(past_games)} past games")
             
             # Add target variables (only for finished games)
             if is_finished and not team_game_stats.empty:
@@ -335,22 +381,126 @@ class FeatureTransformer:
         game_date,
         past_games: pd.DataFrame
     ) -> Dict[str, Any]:
-        """Compute rolling averages from past games."""
+        """
+        Compute rolling averages from past games using exponential decay weighting.
         
-        # Sort by date descending for rolling windows
+        This method is used to pre-compute features for the TeamRollingFeatures table.
+        It uses the same exponential decay logic as calculate_rolling_stats() to ensure
+        consistency between pre-computed and on-the-fly calculations.
+        
+        Weight formula: w_i = e^(-λ * games_ago_i)
+        Where games_ago_i = 0 for most recent game, 1 for previous, etc.
+        """
+        # Sort by date descending (most recent first)
         past_games = past_games.sort_values('game_date', ascending=False)
+        
+        # Get decay rate from settings
+        from config.settings import get_settings
+        settings = get_settings()
+        decay_rate = settings.ROLLING_STATS_DECAY_RATE
+        
+        def safe_weighted_mean(series: pd.Series, weights: np.ndarray) -> Optional[float]:
+            """
+            Calculate weighted mean, handling None/NaN values.
+            
+            Args:
+                series: Pandas Series with values
+                weights: NumPy array with corresponding weights
+                
+            Returns:
+                Weighted mean or None if no valid values
+            """
+            if series.empty or series.isna().all():
+                return None
+            
+            # Filter out NaN values
+            valid_mask = ~series.isna()
+            if not valid_mask.any():
+                return None
+            
+            valid_series = series[valid_mask]
+            valid_weights = weights[valid_mask.values]
+            
+            if valid_weights.sum() == 0:
+                return None
+            
+            return (valid_series * valid_weights).sum() / valid_weights.sum()
+        
+        def compute_weighted_stats(df: pd.DataFrame, window_name: str) -> Dict[str, Optional[float]]:
+            """
+            Compute weighted statistics for a rolling window.
+            
+            Args:
+                df: DataFrame with past games (already sorted, most recent first)
+                window_name: Prefix for feature names (e.g., 'l5', 'l10', 'l20')
+                
+            Returns:
+                Dictionary with weighted statistics
+            """
+            if df.empty:
+                stats = {
+                    f'{window_name}_points': None,
+                    f'{window_name}_points_allowed': None,
+                    f'{window_name}_fg_pct': None,
+                    f'{window_name}_three_pct': None,
+                    f'{window_name}_win_pct': None,
+                }
+                # Add extra stats for l5 and l10
+                if window_name in ('l5', 'l10'):
+                    stats.update({
+                        f'{window_name}_ft_pct': None,
+                        f'{window_name}_rebounds': None,
+                        f'{window_name}_assists': None,
+                        f'{window_name}_turnovers': None,
+                        f'{window_name}_steals': None,
+                        f'{window_name}_blocks': None,
+                    })
+                return stats
+            
+            # Calculate weights: most recent game (index 0) has weight 1.0
+            num_games = len(df)
+            weights = np.array([np.exp(-decay_rate * i) for i in range(num_games)])
+            
+            stats = {}
+            
+            # Simple weighted averages for count-based stats
+            stats[f'{window_name}_points'] = safe_weighted_mean(df['points'], weights)
+            stats[f'{window_name}_points_allowed'] = safe_weighted_mean(df['points_allowed'], weights)
+            stats[f'{window_name}_win_pct'] = (
+                safe_weighted_mean(df['won'], weights) * 100 
+                if 'won' in df.columns and not df['won'].isna().all() else None
+            )
+            
+            # For percentages, we can use the pre-calculated percentages with weighting
+            # Or use weighted totals - using pre-calculated for simplicity here
+            stats[f'{window_name}_fg_pct'] = safe_weighted_mean(df['field_goal_percentage'], weights)
+            stats[f'{window_name}_three_pct'] = safe_weighted_mean(df['three_point_percentage'], weights)
+            
+            # Add extra stats for l5 and l10
+            if window_name in ('l5', 'l10'):
+                stats[f'{window_name}_ft_pct'] = safe_weighted_mean(df['free_throw_percentage'], weights)
+                stats[f'{window_name}_rebounds'] = safe_weighted_mean(df['rebounds_total'], weights)
+                stats[f'{window_name}_assists'] = safe_weighted_mean(df['assists'], weights)
+                stats[f'{window_name}_turnovers'] = safe_weighted_mean(df['turnovers'], weights)
+                stats[f'{window_name}_steals'] = safe_weighted_mean(df['steals'], weights)
+                stats[f'{window_name}_blocks'] = safe_weighted_mean(df['blocks'], weights)
+            
+            return stats
         
         # Get last N games
         l5 = past_games.head(5)
         l10 = past_games.head(10)
         l20 = past_games.head(20)
         
-        # Calculate averages with safe mean
-        def safe_mean(series):
-            if series.empty or series.isna().all():
-                return None
-            return series.mean()
+        # Compute weighted statistics for each window
+        l5_stats = compute_weighted_stats(l5, 'l5')
+        l10_stats = compute_weighted_stats(l10, 'l10')
+        l20_stats = compute_weighted_stats(l20, 'l20')
         
+        # Calculate weights for advanced metrics (using l10)
+        l10_weights = np.array([np.exp(-decay_rate * i) for i in range(len(l10))]) if not l10.empty else np.array([])
+        
+        # Build features dictionary
         features = {
             'game_id': game_id,
             'team_id': team_id,
@@ -358,58 +508,34 @@ class FeatureTransformer:
             'game_date': game_date.date() if hasattr(game_date, 'date') else game_date,
             'season': self.season,
             
-            # Last 5 games
-            'l5_points': safe_mean(l5['points']),
-            'l5_points_allowed': safe_mean(l5['points_allowed']),
-            'l5_fg_pct': safe_mean(l5['field_goal_percentage']),
-            'l5_three_pct': safe_mean(l5['three_point_percentage']),
-            'l5_ft_pct': safe_mean(l5['free_throw_percentage']),
-            'l5_rebounds': safe_mean(l5['rebounds_total']),
-            'l5_assists': safe_mean(l5['assists']),
-            'l5_turnovers': safe_mean(l5['turnovers']),
-            'l5_steals': safe_mean(l5['steals']),
-            'l5_blocks': safe_mean(l5['blocks']),
-            'l5_win_pct': safe_mean(l5['won']) * 100 if not l5.empty else None,
+            # Last 5 games (weighted)
+            **l5_stats,
             
-            # Last 10 games
-            'l10_points': safe_mean(l10['points']),
-            'l10_points_allowed': safe_mean(l10['points_allowed']),
-            'l10_fg_pct': safe_mean(l10['field_goal_percentage']),
-            'l10_three_pct': safe_mean(l10['three_point_percentage']),
-            'l10_ft_pct': safe_mean(l10['free_throw_percentage']),
-            'l10_rebounds': safe_mean(l10['rebounds_total']),
-            'l10_assists': safe_mean(l10['assists']),
-            'l10_turnovers': safe_mean(l10['turnovers']),
-            'l10_steals': safe_mean(l10['steals']),
-            'l10_blocks': safe_mean(l10['blocks']),
-            'l10_win_pct': safe_mean(l10['won']) * 100 if not l10.empty else None,
+            # Last 10 games (weighted)
+            **l10_stats,
             
-            # Last 20 games (or season average)
-            'l20_points': safe_mean(l20['points']),
-            'l20_points_allowed': safe_mean(l20['points_allowed']),
-            'l20_fg_pct': safe_mean(l20['field_goal_percentage']),
-            'l20_three_pct': safe_mean(l20['three_point_percentage']),
-            'l20_win_pct': safe_mean(l20['won']) * 100 if not l20.empty else None,
+            # Last 20 games (weighted)
+            **l20_stats,
             
-            # Advanced metrics (from last 10 games)
-            'offensive_rating': None,  # Will be calculated using TeamFeatureCalculator
+            # Advanced metrics (calculated using TeamFeatureCalculator)
+            'offensive_rating': None,
             'defensive_rating': None,
             'net_rating': None,
             'pace': None,
-            'efg_pct': safe_mean(l10['effective_field_goal_percentage']),
-            'ts_pct': safe_mean(l10['true_shooting_percentage']),
+            'efg_pct': safe_weighted_mean(l10['effective_field_goal_percentage'], l10_weights) if not l10.empty and 'effective_field_goal_percentage' in l10.columns else None,
+            'ts_pct': safe_weighted_mean(l10['true_shooting_percentage'], l10_weights) if not l10.empty and 'true_shooting_percentage' in l10.columns else None,
             'tov_pct': None,
-            'offensive_rebound_rate': None,  # Will be calculated
+            'offensive_rebound_rate': None,
             'defensive_rebound_rate': None,
             'assist_rate': None,
             'steal_rate': None,
             'block_rate': None,
-            'avg_point_differential': safe_mean(l10['points'] - l10['points_allowed']) if not l10.empty else None,
-            'avg_points_for': safe_mean(l10['points']),
-            'avg_points_against': safe_mean(l10['points_allowed']),
-            'win_streak': None,  # Will be calculated
+            'avg_point_differential': safe_weighted_mean(l10['points'] - l10['points_allowed'], l10_weights) if not l10.empty else None,
+            'avg_points_for': safe_weighted_mean(l10['points'], l10_weights) if not l10.empty else None,
+            'avg_points_against': safe_weighted_mean(l10['points_allowed'], l10_weights) if not l10.empty else None,
+            'win_streak': None,
             'loss_streak': None,
-            'players_out': None,  # Will be calculated
+            'players_out': None,
             'players_questionable': None,
             'injury_severity_score': None,
         }
@@ -432,6 +558,7 @@ class FeatureTransformer:
         
         # Calculate streaks
         try:
+            game_date_obj = game_date.date() if hasattr(game_date, 'date') else game_date
             streak = self.team_calc.calculate_current_streak(team_id, game_date_obj)
             features['win_streak'] = streak.get('win_streak', 0)
             features['loss_streak'] = streak.get('loss_streak', 0)
@@ -440,6 +567,7 @@ class FeatureTransformer:
         
         # Calculate injury features
         try:
+            game_date_obj = game_date.date() if hasattr(game_date, 'date') else game_date
             injury = self.team_calc.calculate_injury_impact(team_id, game_date_obj)
             features['players_out'] = injury.get('players_out')
             features['players_questionable'] = injury.get('players_questionable')
@@ -467,11 +595,13 @@ class FeatureTransformer:
             features['is_back_to_back'] = None
             features['games_in_last_7_days'] = None
         
-        # Home/Away win percentages
+        # Home/Away win percentages (using weighted mean)
         home_games = past_games[past_games['is_home'] == True]
         away_games = past_games[past_games['is_home'] == False]
-        features['home_win_pct'] = safe_mean(home_games['won']) * 100 if not home_games.empty else None
-        features['away_win_pct'] = safe_mean(away_games['won']) * 100 if not away_games.empty else None
+        home_weights = np.array([np.exp(-decay_rate * i) for i in range(len(home_games))]) if not home_games.empty else np.array([])
+        away_weights = np.array([np.exp(-decay_rate * i) for i in range(len(away_games))]) if not away_games.empty else np.array([])
+        features['home_win_pct'] = safe_weighted_mean(home_games['won'], home_weights) * 100 if not home_games.empty else None
+        features['away_win_pct'] = safe_weighted_mean(away_games['won'], away_weights) * 100 if not away_games.empty else None
         
         return features
     

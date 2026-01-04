@@ -164,9 +164,28 @@ class PredictionService:
                 team_id=game.away_team_id
             ).first()
             
-            # If rolling features don't exist, calculate them on-the-fly
-            if not home_features or not away_features:
-                logger.info(f"Rolling features not found for game {game_id}, calculating on-the-fly...")
+            # Check if features exist AND have valid values (not all None)
+            # If features are None/empty, recalculate on-the-fly
+            features_valid = False
+            if home_features and away_features:
+                # Check if key features have values (not all None)
+                key_features = ['l5_points', 'l10_points', 'l5_win_pct']
+                home_has_data = any(
+                    getattr(home_features, feat, None) is not None 
+                    for feat in key_features
+                )
+                away_has_data = any(
+                    getattr(away_features, feat, None) is not None 
+                    for feat in key_features
+                )
+                features_valid = home_has_data and away_has_data
+            
+            # If rolling features don't exist or are invalid, calculate them on-the-fly
+            if not features_valid:
+                if home_features or away_features:
+                    logger.debug(f"Rolling features exist but are None for game {game_id}, recalculating on-the-fly...")
+                else:
+                    logger.info(f"Rolling features not found for game {game_id}, calculating on-the-fly...")
                 feature_df = self._calculate_features_on_the_fly(game_id, game)
                 if feature_df is not None:
                     # Handle missing values
@@ -248,12 +267,14 @@ class PredictionService:
                         game_id=game_id
                     ).first()
                     
+                    # Initialize aggregator for on-the-fly calculations
+                    from src.features.feature_aggregator import FeatureAggregator
+                    aggregator = FeatureAggregator(self.db_manager)
+                    
                     if matchup_features:
                         feature_dict.update(self._extract_matchup_features(matchup_features))
                     else:
                         # Calculate matchup features on-the-fly
-                        from src.features.feature_aggregator import FeatureAggregator
-                        aggregator = FeatureAggregator(self.db_manager)
                         matchup_dict = aggregator._calculate_matchup_features(
                             game.home_team_id, game.away_team_id, game.game_date, 10
                         )
