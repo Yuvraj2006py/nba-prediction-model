@@ -245,16 +245,19 @@ class PredictionService:
         try:
             # First, try to use most recent TeamRollingFeatures as baseline
             with self.db_manager.get_session() as session:
-                # Get most recent features for home team
+                # Get most recent features for home team with VALID data
+                # (filter for l5_points not null to avoid empty features from betting API games)
                 home_recent = session.query(TeamRollingFeatures).filter(
                     TeamRollingFeatures.team_id == game.home_team_id,
-                    TeamRollingFeatures.game_date < game.game_date
+                    TeamRollingFeatures.game_date < game.game_date,
+                    TeamRollingFeatures.l5_points.isnot(None)  # Must have valid data
                 ).order_by(TeamRollingFeatures.game_date.desc()).first()
                 
-                # Get most recent features for away team
+                # Get most recent features for away team with VALID data
                 away_recent = session.query(TeamRollingFeatures).filter(
                     TeamRollingFeatures.team_id == game.away_team_id,
-                    TeamRollingFeatures.game_date < game.game_date
+                    TeamRollingFeatures.game_date < game.game_date,
+                    TeamRollingFeatures.l5_points.isnot(None)  # Must have valid data
                 ).order_by(TeamRollingFeatures.game_date.desc()).first()
                 
                 # If we have recent features, use them as baseline and only update what's needed
