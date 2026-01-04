@@ -51,6 +51,9 @@ data/models/*
 # Allow CSV files in data/raw/csv
 !data/raw/csv/
 !data/raw/csv/**/*.csv
+# Exclude API sample responses (may contain sensitive data)
+data/*_sample_*.json
+data/rapidapi_*.json
 
 # Logs
 *.log

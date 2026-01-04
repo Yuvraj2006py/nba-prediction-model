@@ -15,8 +15,16 @@ def test_rapidapi_injuries():
     print("=" * 70)
     
     # API configuration
+    from config.settings import get_settings
+    settings = get_settings()
+    
     host = "nba-injuries-reports.p.rapidapi.com"
-    api_key = "49bb49d912msh1622d0ab103a2ccp1482b4jsnd6167f842e4d"
+    api_key = settings.RAPIDAPI_NBA_INJURIES_KEY
+    
+    if not api_key:
+        print("[ERROR] RAPIDAPI_NBA_INJURIES_KEY not set in environment")
+        print("Please set it in your .env file")
+        return
     
     headers = {
         'x-rapidapi-key': api_key,

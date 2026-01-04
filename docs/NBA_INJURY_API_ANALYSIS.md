@@ -95,8 +95,8 @@ Headers:
 - May need to upgrade plan for production use
 
 **How to Use:**
-1. API key already provided: `49bb49d912msh1622d0ab103a2ccp1482b4jsnd6167f842e4d`
-2. Add to `.env` as `RAPIDAPI_NBA_INJURIES_KEY`
+1. Get your API key from: https://rapidapi.com/nichustm/api/nba-injuries-reports
+2. Add to `.env` as `RAPIDAPI_NBA_INJURIES_KEY=your_api_key_here`
 3. Use endpoint: `/injuries/nba/{date}` where date is YYYY-MM-DD format
 
 **API Documentation**: https://rapidapi.com/nichustm/api/nba-injuries-reports
@@ -166,8 +166,8 @@ Headers:
 ### Immediate Actions
 
 1. **✅ USE RAPIDAPI NBA INJURIES** (Recommended - Already Working!)
-   - API key already available: `49bb49d912msh1622d0ab103a2ccp1482b4jsnd6167f842e4d`
-   - Add to `.env` as `RAPIDAPI_NBA_INJURIES_KEY`
+   - Get API key from: https://rapidapi.com/nichustm/api/nba-injuries-reports
+   - Add to `.env` as `RAPIDAPI_NBA_INJURIES_KEY=your_api_key_here`
    - Test script already created: `scripts/test_rapidapi_injuries.py`
    - **This is the fastest path to working injury tracking**
 
@@ -348,7 +348,7 @@ if response.status_code == 200:
 
 **✅ SOLUTION FOUND: RapidAPI NBA Injuries Reports**
 - **Status**: Working and tested successfully
-- **API Key**: Already available (`49bb49d912msh1622d0ab103a2ccp1482b4jsnd6167f842e4d`)
+- **API Key**: Get from https://rapidapi.com/nichustm/api/nba-injuries-reports
 - **Next Steps**: 
   1. Add `RAPIDAPI_NBA_INJURIES_KEY` to `.env` file
   2. Implement `RapidAPIInjuryCollector` class

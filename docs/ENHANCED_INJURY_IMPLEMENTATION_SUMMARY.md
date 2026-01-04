@@ -217,8 +217,10 @@ for team, data in summary.items():
 
 1. **Add RapidAPI Key to .env:**
    ```
-   RAPIDAPI_NBA_INJURIES_KEY=49bb49d912msh1622d0ab103a2ccp1482b4jsnd6167f842e4d
+   RAPIDAPI_NBA_INJURIES_KEY=your_rapidapi_key_here
    ```
+   
+   Get your API key from: https://rapidapi.com/nichustm/api/nba-injuries-reports
 
 2. **Integrate into Daily Workflow:**
    Add injury collection step before predictions in `scripts/daily_workflow.py`
