@@ -98,6 +98,18 @@ class Settings:
     COMMISSION_RATE: float = float(os.getenv("COMMISSION_RATE", "0.0"))  # Betting commission
     TRANSACTION_COST: float = float(os.getenv("TRANSACTION_COST", "0.0"))  # Per-bet cost
     
+    # RapidAPI Configuration (for real-time injury data)
+    RAPIDAPI_NBA_INJURIES_KEY: Optional[str] = os.getenv("RAPIDAPI_NBA_INJURIES_KEY")
+    RAPIDAPI_NBA_INJURIES_HOST: str = os.getenv("RAPIDAPI_NBA_INJURIES_HOST", "nba-injuries-reports.p.rapidapi.com")
+    
+    # Enhanced Injury Feature Configuration
+    USE_ENHANCED_INJURIES: bool = os.getenv("USE_ENHANCED_INJURIES", "True").lower() == "true"
+    PLAYER_IMPORTANCE_GAMES_BACK: int = int(os.getenv("PLAYER_IMPORTANCE_GAMES_BACK", "20"))
+    TOP_PLAYERS_COUNT: int = int(os.getenv("TOP_PLAYERS_COUNT", "5"))
+    INJURY_WEIGHT_OUT: float = float(os.getenv("INJURY_WEIGHT_OUT", "1.0"))
+    INJURY_WEIGHT_QUESTIONABLE: float = float(os.getenv("INJURY_WEIGHT_QUESTIONABLE", "0.5"))
+    INJURY_WEIGHT_PROBABLE: float = float(os.getenv("INJURY_WEIGHT_PROBABLE", "0.25"))
+    
     @classmethod
     def create_directories(cls):
         """Create necessary directories if they don't exist."""

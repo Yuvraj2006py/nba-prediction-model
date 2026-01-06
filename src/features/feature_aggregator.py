@@ -36,7 +36,32 @@ class FeatureAggregator:
         self.contextual_calc = ContextualFeatureCalculator(db_manager)
         self.betting_calc = BettingFeatureCalculator(db_manager)
         
+        # Real-time injury data (team_id -> {player_name: injury_status})
+        self._realtime_injuries: Dict[str, Dict[str, str]] = {}
+        
+        # Whether to use enhanced injury calculation
+        self._use_enhanced_injuries = getattr(self.settings, 'USE_ENHANCED_INJURIES', True)
+        
         logger.info("FeatureAggregator initialized")
+    
+    def set_realtime_injuries(self, injuries: Dict[str, Dict[str, str]]) -> None:
+        """
+        Set real-time injury data for prediction.
+        
+        Args:
+            injuries: Dictionary mapping team_id -> {player_name: injury_status}
+                     where injury_status is 'out', 'questionable', 'probable', or 'healthy'
+        """
+        self._realtime_injuries = injuries or {}
+        logger.info(f"Set real-time injuries for {len(injuries)} teams")
+    
+    def clear_realtime_injuries(self) -> None:
+        """Clear real-time injury data."""
+        self._realtime_injuries = {}
+    
+    def get_realtime_injuries_for_team(self, team_id: str) -> Optional[Dict[str, str]]:
+        """Get real-time injuries for a specific team."""
+        return self._realtime_injuries.get(team_id)
     
     def create_feature_vector(
         self,
@@ -173,8 +198,14 @@ class FeatureAggregator:
         features[f'{prefix}win_streak'] = streak.get('win_streak', 0)
         features[f'{prefix}loss_streak'] = streak.get('loss_streak', 0)
         
-        # Injury impact
-        injury = self.team_calc.calculate_injury_impact(team_id, end_date)
+        # Injury impact (enhanced with weighted importance and real-time data)
+        realtime_injuries = self.get_realtime_injuries_for_team(team_id)
+        injury = self.team_calc.calculate_injury_impact(
+            team_id=team_id,
+            end_date=end_date,
+            use_weighted_importance=self._use_enhanced_injuries,
+            realtime_injuries=realtime_injuries
+        )
         features[f'{prefix}players_out'] = injury.get('players_out')
         features[f'{prefix}players_questionable'] = injury.get('players_questionable')
         features[f'{prefix}injury_severity_score'] = injury.get('injury_severity_score')

@@ -379,11 +379,15 @@ class BettingOddsCollector:
                             api_away_team=api_away_team
                         )
                         if line_data:
-                            try:
-                                self.db_manager.insert_betting_line(line_data)
-                                stored_count += 1
-                            except Exception as e:
-                                logger.warning(f"Error storing betting line: {e}")
+                            # Validate betting line before storing
+                            if self._validate_betting_line(line_data):
+                                try:
+                                    self.db_manager.insert_betting_line(line_data)
+                                    stored_count += 1
+                                except Exception as e:
+                                    logger.warning(f"Error storing betting line: {e}")
+                            else:
+                                logger.debug(f"Skipping invalid betting line for {game_id}")
                 
             except Exception as e:
                 logger.error(f"Error processing odds data: {e}")
@@ -413,8 +417,8 @@ class BettingOddsCollector:
             if not home_team or not away_team:
                 return None
             
-            # Parse date and convert to US timezone for game ID
-            # Games that are early morning UTC (0-6 AM) are actually "tonight" in US time
+            # Parse date from UTC datetime - convert to US Eastern for correct game date
+            # NBA games should be stored by their US Eastern date (e.g., 2026-01-06 01:00 UTC is 8 PM Jan 5 ET)
             if commence_time:
                 try:
                     if 'T' in commence_time:
@@ -424,11 +428,11 @@ class BettingOddsCollector:
                         else:
                             game_datetime_utc = datetime.fromisoformat(commence_time)
                         
-                        # Convert to US Eastern Time (most NBA games are in ET)
+                        # Convert to US Eastern Time to get correct game date
                         from datetime import timezone, timedelta
-                        et_tz = timezone(timedelta(hours=-5))
-                        game_datetime_us = game_datetime_utc.astimezone(et_tz)
-                        game_date = game_datetime_us.date()
+                        EST = timezone(timedelta(hours=-5))
+                        game_datetime_et = game_datetime_utc.astimezone(EST)
+                        game_date = game_datetime_et.date()
                     else:
                         game_date = datetime.strptime(commence_time, '%Y-%m-%d').date()
                 except (ValueError, TypeError):
@@ -478,7 +482,8 @@ class BettingOddsCollector:
             if not home_team or not away_team:
                 return None
             
-            # Extract commence time and convert to US timezone
+            # Extract commence time - convert to US Eastern for correct game date
+            # NBA games should be stored by their US Eastern date
             commence_time = odds_data.get('commence_time', '')
             if commence_time:
                 try:
@@ -489,12 +494,11 @@ class BettingOddsCollector:
                         else:
                             dt_utc = datetime.fromisoformat(commence_time)
                         
-                        # Convert to US Eastern Time (most NBA games are in ET)
-                        # Use UTC-5 for EST or UTC-4 for EDT (simplified to UTC-5)
+                        # Convert to US Eastern Time to get correct game date
                         from datetime import timezone, timedelta
-                        et_tz = timezone(timedelta(hours=-5))
-                        dt_us = dt_utc.astimezone(et_tz)
-                        game_date = dt_us.date()
+                        EST = timezone(timedelta(hours=-5))
+                        game_datetime_et = dt_utc.astimezone(EST)
+                        game_date = game_datetime_et.date()
                     else:
                         game_date = datetime.strptime(commence_time, '%Y-%m-%d').date()
                 except (ValueError, TypeError):
@@ -604,18 +608,34 @@ class BettingOddsCollector:
                               any(word in name_lower for word in away_lower.split() if len(word) > 3)):
                             is_away = True
                     
-                    # Store odds in correct field
+                    # Store odds in correct field (with validation)
+                    price_int = int(price)
+                    
+                    # Validate odds are in reasonable range (-10000 to +10000)
+                    if price_int < -10000 or price_int > 10000:
+                        logger.debug(f"Skipping unrealistic odds: {price_int} for {name}")
+                        continue
+                    
                     if is_home:
-                        line_data['moneyline_home'] = int(price)
+                        line_data['moneyline_home'] = price_int
                     elif is_away:
-                        line_data['moneyline_away'] = int(price)
+                        line_data['moneyline_away'] = price_int
                     else:
                         # Fallback: if we can't match, store in order (first = home, second = away)
                         # This is not ideal but better than nothing
                         if line_data['moneyline_home'] is None:
-                            line_data['moneyline_home'] = int(price)
+                            line_data['moneyline_home'] = price_int
                         else:
-                            line_data['moneyline_away'] = int(price)
+                            line_data['moneyline_away'] = price_int
+            
+            # Validate final line data before returning
+            # Check for unrealistic odds or suspicious patterns
+            if line_data['moneyline_home'] is not None and line_data['moneyline_away'] is not None:
+                # Check if both teams have the same odds (suspicious unless close to even)
+                if (line_data['moneyline_home'] == line_data['moneyline_away'] and 
+                    abs(line_data['moneyline_home']) > 150):
+                    logger.debug(f"Skipping betting line with same odds for both teams: {line_data['moneyline_home']}")
+                    return None
             
             elif market_key == 'spreads':  # Point spread
                 for outcome in outcomes:
@@ -681,4 +701,39 @@ class BettingOddsCollector:
         except Exception as e:
             logger.error(f"Error extracting betting line: {e}")
             return None
+    
+    def _validate_betting_line(self, line_data: Dict[str, Any]) -> bool:
+        """
+        Validate betting line data for reasonableness.
+        
+        Args:
+            line_data: Betting line dictionary
+            
+        Returns:
+            True if valid, False otherwise
+        """
+        # Check moneyline odds are in reasonable range (-10000 to +10000)
+        if line_data.get('moneyline_home') is not None:
+            ml_home = line_data['moneyline_home']
+            if ml_home < -10000 or ml_home > 10000:
+                logger.debug(f"Invalid home moneyline odds: {ml_home}")
+                return False
+        
+        if line_data.get('moneyline_away') is not None:
+            ml_away = line_data['moneyline_away']
+            if ml_away < -10000 or ml_away > 10000:
+                logger.debug(f"Invalid away moneyline odds: {ml_away}")
+                return False
+        
+        # Check for suspicious patterns (same odds for both teams unless close to even)
+        # Allow same odds if they're between -150 and +150 (close to even money)
+        if (line_data.get('moneyline_home') is not None and 
+            line_data.get('moneyline_away') is not None):
+            ml_home = line_data['moneyline_home']
+            ml_away = line_data['moneyline_away']
+            if ml_home == ml_away and abs(ml_home) > 200:
+                logger.debug(f"Suspicious: same odds for both teams: {ml_home}")
+                return False
+        
+        return True
 

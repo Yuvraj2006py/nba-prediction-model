@@ -1,0 +1,179 @@
+# Useful Commands for NBA Prediction Model
+# =========================================
+
+## DATA COLLECTION
+# ================
+
+# Import CSV data into database
+python scripts/import_csv_data.py --season 2024-25
+python scripts/import_csv_data.py --all-seasons
+
+# Collect stats from Basketball Reference (Selenium - recommended)
+python scripts/collect_full_season_bball_ref_fast.py --season 2024-25 --workers 3
+python scripts/collect_full_season_bball_ref_fast.py --season 2023-24 --workers 3
+python scripts/collect_full_season_bball_ref_fast.py --season 2022-23 --workers 3
+
+# Collect stats from NBA API (faster but may miss rebounds)
+python scripts/collect_historical_data.py --season 2024-25
+
+# Backfill missing rebounds
+python scripts/backfill_rebounds_bball_ref.py --season 2024-25
+
+# Update finished games with scores
+python scripts/update_finished_games.py
+
+# Fix game scores
+python scripts/fix_game_scores.py
+
+
+## DATA VALIDATION & CHECKING
+# ============================
+
+# Check data collection status
+python scripts/check_data_status.py
+
+# Comprehensive data quality check
+python scripts/check_data_quality.py
+
+# Validate specific season
+python scripts/validate_season_data.py --season 2024-25
+
+# Check available data
+python scripts/check_available_data.py
+
+# Check feature counts
+python scripts/check_feature_counts.py
+
+# Check SQLite data
+python scripts/check_sqlite_data.py
+
+
+## FEATURE ENGINEERING
+# ====================
+
+# Generate features for a season
+python scripts/generate_features.py --season 2024-25
+
+# Generate features for all seasons
+python scripts/generate_features.py
+
+# Generate features with limit (testing)
+python scripts/generate_features.py --season 2024-25 --limit 10
+
+# Transform features
+python scripts/transform_features.py
+
+# Cleanup partial features
+python scripts/cleanup_partial_features.py
+
+
+## MODEL TRAINING
+# ===============
+
+# Train model
+python scripts/train_model.py
+
+# Train with specific options
+python scripts/train_model.py --season 2024-25 --model-type classification
+
+# Retrain with regularization
+python scripts/retrain_with_regularization.py
+
+# Retrain with feature contract
+python scripts/retrain_with_feature_contract.py
+
+
+## PREDICTIONS
+# ============
+
+# Make predictions for today's games
+python scripts/make_predictions.py
+
+# Predict specific games
+python scripts/predict_today_games.py
+
+# Predict games via CLI
+python scripts/predict_cli.py
+
+# Monitor predictions
+python scripts/monitor_predictions.py
+
+
+## DATA EXPORT
+# ============
+
+# Export stats to CSV
+python scripts/export_stats_to_csv.py --season 2024-25
+python scripts/export_stats_to_csv.py --all-seasons
+
+
+## TESTING & DIAGNOSTICS
+# =======================
+
+# Test data loader
+python scripts/test_data_loader.py
+
+# Test trainer
+python scripts/test_trainer.py
+
+# Test XGBoost model
+python scripts/test_xgboost_model.py
+
+# Test prediction service
+python scripts/test_prediction_service.py
+
+# Test production pipeline
+python scripts/test_production_pipeline.py
+
+# Diagnose feature mismatch
+python scripts/diagnose_feature_mismatch.py
+
+# Investigate features
+python scripts/investigate_features.py
+
+# Test enhanced injury features (end-to-end)
+python scripts/test_enhanced_injury_e2e.py
+
+# Run unit tests for enhanced injuries
+python -m pytest tests/test_enhanced_injury_prediction.py -v
+
+
+## DAILY WORKFLOW
+# ===============
+
+# Run full daily workflow (fetch games, collect injuries, predict, update scores)
+python scripts/daily_workflow.py
+
+# Morning workflow only (fetch, predict, bet)
+python scripts/daily_workflow.py --morning
+
+# Evening workflow only (update scores, evaluate, resolve bets)
+python scripts/daily_workflow.py --evening
+
+# Run without betting
+python scripts/daily_workflow.py --no-betting
+
+# ETL pipeline
+python scripts/etl_pipeline.py
+
+
+## DATABASE MANAGEMENT
+# ====================
+
+# Clear database (careful!)
+python scripts/clear_database.py
+
+# Migrate schema
+python scripts/migrate_schema.py
+
+
+## QUICK REFERENCE
+# ================
+
+# Most common workflow:
+# 1. Import CSV games: python scripts/import_csv_data.py --season 2024-25
+# 2. Collect stats: python scripts/collect_full_season_bball_ref_fast.py --season 2024-25 --workers 3
+# 3. Check data: python scripts/check_data_status.py
+# 4. Generate features: python scripts/generate_features.py --season 2024-25
+# 5. Train model: python scripts/train_model.py
+# 6. Make predictions: python scripts/make_predictions.py

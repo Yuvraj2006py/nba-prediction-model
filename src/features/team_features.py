@@ -578,18 +578,31 @@ class TeamFeatureCalculator:
     def calculate_injury_impact(
         self,
         team_id: str,
-        end_date: Optional[date] = None
+        end_date: Optional[date] = None,
+        use_weighted_importance: bool = True,
+        realtime_injuries: Optional[Dict[str, str]] = None
     ) -> Dict[str, Optional[float]]:
         """
         Calculate team injury impact based on player stats.
         
+        When use_weighted_importance=True, the severity score accounts for
+        player importance (star players hurt more than bench players).
+        
         Args:
             team_id: Team identifier
             end_date: Cutoff date (to avoid data leakage)
+            use_weighted_importance: If True, weight injuries by player importance
+            realtime_injuries: Optional dict mapping player_name -> injury_status
+                             from RapidAPI for real-time injury updates
             
         Returns:
-            Dictionary with injury metrics
+            Dictionary with injury metrics:
+            - players_out: Count of players out
+            - players_questionable: Count of players questionable
+            - injury_severity_score: Weighted severity (0-1, higher = more injured)
         """
+        from src.features.player_importance import PlayerImportanceCalculator
+        
         # Get most recent game before end_date
         games = self.db_manager.get_games(
             team_id=team_id,
@@ -613,27 +626,165 @@ class TeamFeatureCalculator:
                 team_id=team_id
             ).all()
         
+        if not player_stats:
+            return {
+                'players_out': 0,
+                'players_questionable': 0,
+                'injury_severity_score': 0.0
+            }
+        
         players_out = 0
         players_questionable = 0
         total_players = len(player_stats)
         
+        # Build injury status map, prioritizing real-time data if available
+        injury_map = {}
         for player in player_stats:
-            if player.injury_status == 'out':
+            player_name = player.player_name or ''
+            player_id = player.player_id
+            
+            # Check if we have real-time injury data for this player
+            if realtime_injuries:
+                # Try exact match first
+                if player_name in realtime_injuries:
+                    injury_map[player_id] = realtime_injuries[player_name]
+                    continue
+                # Try partial match (first/last name)
+                matched = False
+                for rt_name, rt_status in realtime_injuries.items():
+                    if self._fuzzy_name_match(player_name, rt_name):
+                        injury_map[player_id] = rt_status
+                        matched = True
+                        break
+                if matched:
+                    continue
+            
+            # Fall back to database injury status
+            injury_map[player_id] = player.injury_status or 'healthy'
+        
+        # Count injuries
+        for player_id, status in injury_map.items():
+            if status == 'out':
                 players_out += 1
-            elif player.injury_status == 'questionable':
+            elif status in ('questionable', 'doubtful'):
                 players_questionable += 1
         
-        # Calculate severity score (0-1, higher = more injured)
-        if total_players == 0:
-            severity = None
+        # Calculate severity score
+        if not use_weighted_importance or total_players == 0:
+            # Simple count-based severity (backward compatible)
+            if total_players == 0:
+                severity = None
+            else:
+                severity = (players_out * 1.0 + players_questionable * 0.5) / total_players
         else:
-            severity = (players_out * 1.0 + players_questionable * 0.5) / total_players
+            # Weighted severity using player importance
+            try:
+                importance_calc = PlayerImportanceCalculator(self.db_manager)
+                settings = self.settings
+                
+                weight_out = getattr(settings, 'INJURY_WEIGHT_OUT', 1.0)
+                weight_questionable = getattr(settings, 'INJURY_WEIGHT_QUESTIONABLE', 0.5)
+                
+                total_importance = 0.0
+                weighted_injury_score = 0.0
+                
+                for player in player_stats:
+                    player_id = player.player_id
+                    player_name = player.player_name or ''
+                    
+                    # Get player importance score
+                    importance = importance_calc.get_importance_score(
+                        player_id=player_id,
+                        team_id=team_id,
+                        games_back=getattr(settings, 'PLAYER_IMPORTANCE_GAMES_BACK', 20),
+                        end_date=end_date
+                    )
+                    
+                    if importance is None:
+                        importance = 0.1  # Default low importance for unknown players
+                    
+                    total_importance += importance
+                    
+                    # Get injury status
+                    status = injury_map.get(player_id, 'healthy')
+                    
+                    # Calculate weighted injury contribution
+                    if status == 'out':
+                        weighted_injury_score += importance * weight_out
+                    elif status in ('questionable', 'doubtful'):
+                        weighted_injury_score += importance * weight_questionable
+                    elif status == 'probable':
+                        weight_probable = getattr(settings, 'INJURY_WEIGHT_PROBABLE', 0.25)
+                        weighted_injury_score += importance * weight_probable
+                
+                # Normalize to 0-1 range
+                if total_importance > 0:
+                    severity = weighted_injury_score / total_importance
+                else:
+                    severity = 0.0
+                    
+                # Ensure in valid range
+                severity = max(0.0, min(1.0, severity))
+                
+            except Exception as e:
+                logger.debug(f"Error calculating weighted injury impact: {e}")
+                # Fall back to simple calculation
+                severity = (players_out * 1.0 + players_questionable * 0.5) / total_players
         
         return {
             'players_out': players_out,
             'players_questionable': players_questionable,
             'injury_severity_score': round(severity, 3) if severity is not None else None
         }
+    
+    def _fuzzy_name_match(self, db_name: str, rt_name: str) -> bool:
+        """
+        Check if two player names match (handling formatting differences).
+        
+        Args:
+            db_name: Name from database (e.g., "LeBron James")
+            rt_name: Name from real-time API (e.g., "James, LeBron" or "L. James")
+            
+        Returns:
+            True if names likely match the same player
+        """
+        if not db_name or not rt_name:
+            return False
+        
+        db_lower = db_name.lower().strip()
+        rt_lower = rt_name.lower().strip()
+        
+        # Exact match
+        if db_lower == rt_lower:
+            return True
+        
+        # Handle "Last, First" format
+        if ',' in rt_lower:
+            parts = [p.strip() for p in rt_lower.split(',')]
+            if len(parts) == 2:
+                rt_normalized = f"{parts[1]} {parts[0]}"
+                if rt_normalized == db_lower:
+                    return True
+        
+        # Split names and check for overlap
+        db_parts = set(db_lower.split())
+        rt_parts = set(rt_lower.split())
+        
+        # If last name matches and first initial matches
+        if len(db_parts) >= 2 and len(rt_parts) >= 2:
+            db_last = list(db_parts)[-1] if db_parts else ''
+            rt_last = list(rt_parts)[-1] if rt_parts else ''
+            
+            if db_last == rt_last:
+                # Check first initial
+                db_first = list(db_parts)[0] if db_parts else ''
+                rt_first = list(rt_parts)[0] if rt_parts else ''
+                
+                if db_first and rt_first:
+                    if db_first[0] == rt_first[0]:
+                        return True
+        
+        return False
     
     def calculate_assist_rate(
         self,

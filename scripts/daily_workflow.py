@@ -87,9 +87,12 @@ def fetch_todays_games(quiet: bool = False) -> dict:
         all_odds = odds_collector.get_nba_odds()
         
         if all_odds:
-            # Filter for today's games (based on US time)
+            # Filter for today's games only (based on US Eastern date)
+            # NBA games should be categorized by their US Eastern date
+            from datetime import timezone, timedelta
+            EST = timezone(timedelta(hours=-5))
+            
             today_games = []
-            tomorrow_utc = date(today.year, today.month, today.day + 1) if today.day < 28 else today
             
             for game_odds in all_odds:
                 commence_time = game_odds.get('commence_time', '')
@@ -101,11 +104,12 @@ def fetch_todays_games(quiet: bool = False) -> dict:
                             else:
                                 game_datetime_utc = datetime.fromisoformat(commence_time)
                             
-                            game_date_utc = game_datetime_utc.date()
-                            hour_utc = game_datetime_utc.hour
+                            # Convert to US Eastern Time to get correct game date
+                            game_datetime_et = game_datetime_utc.astimezone(EST)
+                            game_date_et = game_datetime_et.date()
                             
-                            # Games on today's date in UTC, or tomorrow UTC before 6 AM
-                            if game_date_utc == today or (game_date_utc == tomorrow_utc and hour_utc < 6):
+                            # Only include games for today (using US Eastern date)
+                            if game_date_et == today:
                                 today_games.append(game_odds)
                     except Exception:
                         pass
@@ -113,21 +117,51 @@ def fetch_todays_games(quiet: bool = False) -> dict:
             stats['fetched'] = len(today_games)
             
             if today_games:
-                stored = odds_collector.parse_and_store_odds(today_games)
-                stats['stored'] = stored
+                # Clean up invalid games for today
+                from src.database.models import Bet, BettingLine, Prediction
+                from src.backtesting.team_mapper import TeamMapper
                 
-                # Ensure games have correct date
                 with db_manager.get_session() as session:
-                    games_to_fix = session.query(Game).filter(
-                        Game.game_date != today,
-                        Game.game_date >= today - timedelta(days=1)
+                    # Get actual team IDs for today's games from API
+                    today_team_pairs = set()
+                    team_mapper = TeamMapper(db_manager)
+                    for game_odds in today_games:
+                        home_team = game_odds.get('home_team', '')
+                        away_team = game_odds.get('away_team', '')
+                        home_id = team_mapper.map_team_name_to_id(home_team)
+                        away_id = team_mapper.map_team_name_to_id(away_team)
+                        if home_id and away_id:
+                            today_team_pairs.add((home_id, away_id))
+                    
+                    # Find games marked as today that are NOT in the API list
+                    invalid_games = session.query(Game).filter(
+                        Game.game_date == today,
+                        Game.game_status == 'scheduled'
                     ).all()
                     
-                    for game in games_to_fix:
-                        # Only fix future games that should be today
-                        if game.game_status == 'scheduled':
-                            game.game_date = today
-                    session.commit()
+                    games_to_delete = []
+                    for game in invalid_games:
+                        game_pair = (game.home_team_id, game.away_team_id)
+                        if game_pair not in today_team_pairs:
+                            # This game is not in today's API - it's invalid
+                            games_to_delete.append(game)
+                    
+                    # Delete invalid games and their associated data
+                    if games_to_delete:
+                        logger.info(f"  Cleaning up {len(games_to_delete)} invalid games from previous runs")
+                        for game in games_to_delete:
+                            # Delete bets
+                            session.query(Bet).filter(Bet.game_id == game.game_id).delete()
+                            # Delete betting lines
+                            session.query(BettingLine).filter(BettingLine.game_id == game.game_id).delete()
+                            # Delete predictions
+                            session.query(Prediction).filter(Prediction.game_id == game.game_id).delete()
+                            # Delete game
+                            session.delete(game)
+                        session.commit()
+                
+                stored = odds_collector.parse_and_store_odds(today_games)
+                stats['stored'] = stored
         
         if not quiet:
             logger.info(f"  Fetched {stats['fetched']} games, stored {stats['stored']} betting lines")
@@ -136,6 +170,148 @@ def fetch_todays_games(quiet: bool = False) -> dict:
         logger.error(f"  Error fetching games: {e}")
     
     return stats
+
+
+def collect_injury_data(quiet: bool = False) -> dict:
+    """Step 1.5: Collect real-time injury data for today's games.
+    
+    This step fetches injury reports from RapidAPI and stores them for use
+    in prediction features. Enhanced injury features weight injuries by
+    player importance (star players hurt more than bench players).
+    """
+    from src.database.db_manager import DatabaseManager
+    from src.database.models import Game, Team
+    from config.settings import get_settings
+    
+    today = date.today()
+    stats = {
+        'injuries_fetched': 0,
+        'teams_with_injuries': 0,
+        'players_out': 0,
+        'players_questionable': 0,
+        'api_available': False
+    }
+    
+    if not quiet:
+        logger.info(f"[STEP 1.5] Collecting injury data for {today}")
+    
+    settings = get_settings()
+    
+    # Check if RapidAPI key is configured
+    api_key = getattr(settings, 'RAPIDAPI_NBA_INJURIES_KEY', None)
+    if not api_key:
+        if not quiet:
+            logger.info("  RapidAPI injury key not configured - using historical injury data")
+        return stats
+    
+    try:
+        from src.data_collectors.rapidapi_injury_collector import RapidAPIInjuryCollector
+        
+        db = DatabaseManager()
+        injury_collector = RapidAPIInjuryCollector(db)
+        
+        # Fetch today's injuries
+        injuries = injury_collector.get_injuries_for_date(today)
+        
+        if injuries:
+            stats['api_available'] = True
+            stats['injuries_fetched'] = len(injuries)
+            
+            # Get injury summary by team
+            summary = injury_collector.get_injury_summary(today)
+            stats['teams_with_injuries'] = len(summary)
+            
+            # Count total players out/questionable
+            for team_name, team_data in summary.items():
+                stats['players_out'] += team_data.get('out_count', 0)
+                stats['players_questionable'] += team_data.get('questionable_count', 0)
+            
+            # Update player injury status for today's games
+            with db.get_session() as session:
+                todays_games = session.query(Game).filter(
+                    Game.game_date == today
+                ).all()
+            
+            if todays_games:
+                update_stats = injury_collector.update_player_injury_status_for_games(
+                    today, todays_games
+                )
+                stats['players_updated'] = update_stats.get('players_updated', 0)
+            
+            if not quiet:
+                logger.info(
+                    f"  Fetched {stats['injuries_fetched']} injury reports, "
+                    f"{stats['players_out']} out, {stats['players_questionable']} questionable"
+                )
+        else:
+            if not quiet:
+                logger.info("  No injury reports found for today")
+                
+    except Exception as e:
+        if not quiet:
+            logger.warning(f"  Error collecting injury data: {e}")
+        logger.debug(f"Injury collection error details: {e}", exc_info=True)
+    
+    return stats
+
+
+def get_realtime_injuries_for_prediction(game_date: date = None) -> dict:
+    """Get real-time injuries formatted for FeatureAggregator.
+    
+    Returns:
+        Dict mapping team_id -> {player_name: injury_status}
+    """
+    from src.database.db_manager import DatabaseManager
+    from src.database.models import Team
+    from config.settings import get_settings
+    
+    if game_date is None:
+        game_date = date.today()
+    
+    result = {}
+    
+    settings = get_settings()
+    api_key = getattr(settings, 'RAPIDAPI_NBA_INJURIES_KEY', None)
+    
+    if not api_key:
+        return result
+    
+    try:
+        from src.data_collectors.rapidapi_injury_collector import RapidAPIInjuryCollector
+        
+        db = DatabaseManager()
+        injury_collector = RapidAPIInjuryCollector(db)
+        
+        # Fetch injuries
+        injuries = injury_collector.get_injuries_for_date(game_date)
+        
+        if not injuries:
+            return result
+        
+        # Map team names to team_ids
+        with db.get_session() as session:
+            teams = {t.team_name: t.team_id for t in session.query(Team).all()}
+        
+        # Build result dict: team_id -> {player_name: injury_status}
+        for injury in injuries:
+            team_name = injury_collector._normalize_team_name(injury.get('team', ''))
+            team_id = teams.get(team_name)
+            
+            if not team_id:
+                continue
+            
+            if team_id not in result:
+                result[team_id] = {}
+            
+            player_name = injury.get('player', '')
+            status = injury_collector._normalize_injury_status(injury.get('status', ''))
+            
+            result[team_id][player_name] = status
+        
+    except Exception as e:
+        logger.debug(f"Error getting real-time injuries: {e}")
+    
+    return result
 
 
 def make_predictions(quiet: bool = False) -> dict:
@@ -783,6 +959,9 @@ def run_morning_workflow(quiet: bool = False, enable_betting: bool = True, strat
     # Step 1: Fetch games
     fetch_stats = fetch_todays_games(quiet)
     
+    # Step 1.5: Collect real-time injury data
+    injury_stats = collect_injury_data(quiet)
+    
     # Step 2: Make predictions
     pred_stats = make_predictions(quiet)
     
@@ -855,6 +1034,10 @@ def run_full_workflow(quiet: bool = False, enable_betting: bool = True, strategi
     
     # All steps
     results['fetch'] = fetch_todays_games(quiet)
+    
+    # Step 1.5: Collect real-time injury data
+    results['injuries'] = collect_injury_data(quiet)
+    
     results['predictions'] = make_predictions(quiet)
     
     # Place bets for today
